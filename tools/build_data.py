@@ -235,7 +235,7 @@ def main():
     ex_json = json.dumps(examples, ensure_ascii=False, indent=1)
     head_gs = "/** 자동 생성(tools/build_data.py) — 작문 «예시 문장». 학생 화면에는 서버가 «먼저 쓴 뒤에만» 내려 준다. */"
     head_js = "/* 자동 생성 — 체험 모드 전용 예시 문장 */"
-    (ROOT / "backend" / "SeedExamples.gs").write_text(head_gs + "\nvar SEED_EXAMPLES = " + ex_json + ";\n", encoding="utf8")
+    (OUT / "examples.json").write_text(ex_json, encoding="utf8")  # Apps Script 의 setup() 이 이 주소에서 가져간다
     (ROOT / "docs" / "js").mkdir(parents=True, exist_ok=True)
     (ROOT / "docs" / "js" / "seed_examples.js").write_text(head_js + "\nvar SEED_EXAMPLES = " + ex_json + ";\n", encoding="utf8")
     (OUT / "cards.json").write_text(json.dumps(cards_out, ensure_ascii=False, separators=(",", ":")), encoding="utf8")

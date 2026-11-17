@@ -50,14 +50,13 @@ var LOCKS = { held: 0, max: 0, total: 0 };
 var LockService = { getScriptLock: function () { return { waitLock: function () { LOCKS.held++; LOCKS.total++; LOCKS.max = Math.max(LOCKS.max, LOCKS.held); }, releaseLock: function () { LOCKS.held--; } }; } };
 var Utilities = { getUuid: function () { return crypto.randomUUID(); } };
 var ContentService = { MimeType: { JSON: 'json' }, createTextOutput: function (s) { return { s: s, setMimeType: function () { return this; }, getContent: function () { return this.s; } }; } };
-var UrlFetchApp = { fetch: function () { return { getContentText: function () { return window.__VOCAB_TEXT; } }; } };
+var UrlFetchApp = { fetch: function (u) { return { getContentText: function () { return /examples\.json$/.test(u) ? window.__EX_TEXT : window.__VOCAB_TEXT; } }; } };
 </script>
 <script src="../docs/js/sha256.js"></script>
 <script src="../docs/js/core.js"></script>
 <script src="../backend/Store.gs"></script>
 <script src="../backend/Code.gs"></script>
 <script src="../backend/Setup.gs"></script>
-<script src="../docs/js/seed_examples.js"></script>
 <script>
 var results = [], current = '';
 function group(name) { current = name; var h = document.createElement('h2'); h.textContent = name; document.getElementById('out').appendChild(h); }
@@ -79,6 +78,7 @@ function code(r) { return r.ok ? 'OK' : r.error.code; }
 
 async function main() {
   window.__VOCAB_TEXT = await (await fetch('../docs/data/vocab.json')).text();
+  window.__EX_TEXT = await (await fetch('../docs/data/examples.json')).text();
   CONFIG.SEED_URL = 'http://mock/vocab.json';
 
   group('설치 (setup)');

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ORDER = ["Sha256.gs", "Core.gs", "Store.gs", "Code.gs", "Setup.gs", "SeedExamples.gs"]
+ORDER = ["Sha256.gs", "Core.gs", "Store.gs", "Code.gs", "Setup.gs"]
 OUT = ROOT / "backend" / "AppsScript_통합.gs"
 
 

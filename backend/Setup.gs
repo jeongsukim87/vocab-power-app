@@ -6,7 +6,7 @@
  */
 var CONFIG = {
   // 어휘 데이터가 올라간 주소 (GitHub Pages 에 배포한 뒤의 vocab.json 주소)
-  SEED_URL: 'https://여기에-깃허브-아이디.github.io/저장소이름/data/vocab.json',
+  SEED_URL: 'https://jeongsukim87.github.io/vocab-power-app/data/vocab.json',
   TEACHER_ID: 'teacher',          // 선생님 로그인 아이디
   TEACHER_NAME: '선생님',         // 화면에 보일 이름
   BACKUP_FOLDER_NAME: '학습도구어_백업', // 드라이브에 만들 백업 폴더
@@ -22,7 +22,8 @@ function setup() {
   var core = newCore_();
 
   var data = JSON.parse(UrlFetchApp.fetch(CONFIG.SEED_URL, { muteHttpExceptions: false }).getContentText());
-  var r = core.seed(data, typeof SEED_EXAMPLES !== 'undefined' ? SEED_EXAMPLES : {});
+  var examples = JSON.parse(UrlFetchApp.fetch(CONFIG.SEED_URL.replace(/vocab\.json$/, 'examples.json')).getContentText());
+  var r = core.seed(data, examples);
   Logger.log('어휘 ' + r.vocabulary_added + '개를 시트에 넣었습니다.');
 
   try {
