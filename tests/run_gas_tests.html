@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Apps Script 코드 시험 (구글 환경을 흉내 낸 가짜 도구로 실행)</title>
+<style>
+  body { font: 14px/1.5 system-ui, "Malgun Gothic", sans-serif; margin: 16px; }
+  .ok { color: #0a7a3d } .bad { color: #c0262d; font-weight: 700 } h2 { margin: 18px 0 4px; font-size: 15px }
+  #sum { font-size: 18px; font-weight: 700; padding: 8px 0 }
+</style>
+</head>
+<body>
+<div id="sum">실행 중…</div>
+<div id="out"></div>
+<script>
+/* ===== 구글 Apps Script 의 도구들을 흉내 낸 가짜(mock) =====
+ * 실제 구글 서버가 아니므로 «시트 저장 방식(행·열 읽고 쓰기, 행 지우기, 잠금)이 코드대로 움직이는지» 만 확인한다. */
+var LOG = [];
+var Logger = { log: function (m) { LOG.push(String(m)); } };
+function MockRange(sh, r, c, nr, nc) { this.sh = sh; this.r = r; this.c = c; this.nr = nr; this.nc = nc; }
+MockRange.prototype.getValues = function () {
+  var out = [];
+  for (var i = 0; i < this.nr; i++) { var row = []; for (var j = 0; j < this.nc; j++) { var v = (this.sh.rows[this.r - 1 + i] || [])[this.c - 1 + j]; row.push(v === undefined || v === null ? '' : v); } out.push(row); }
+  return out;
+};
+MockRange.prototype.setValues = function (vals) {
+  for (var i = 0; i < vals.length; i++) { var idx = this.r - 1 + i; this.sh.rows[idx] = this.sh.rows[idx] || []; for (var j = 0; j < vals[i].length; j++) { var v = vals[i][j]; if (typeof v === 'string' && this.sh.numCols[this.c + j]) v = v === '' ? '' : Number(v); this.sh.rows[idx][this.c - 1 + j] = v; } }
+  return this;
+};
+MockRange.prototype.setFontWeight = function () { return this; };
+MockRange.prototype.setBackground = function () { return this; };
+MockRange.prototype.setNumberFormat = function (f) { for (var j = 0; j < this.nc; j++) this.sh.numCols[this.c + j] = (f === '0'); return this; };
+function MockSheet(name) { this.name = name; this.rows = []; this.numCols = {}; }
+MockSheet.prototype.getRange = function (r, c, nr, nc) { return new MockRange(this, r, c, nr || 1, nc || 1); };
+MockSheet.prototype.getLastRow = function () { var n = 0; this.rows.forEach(function (r, i) { if (r && r.some(function (v) { return v !== '' && v !== undefined; })) n = i + 1; }); return n; };
+MockSheet.prototype.getMaxRows = function () { return 1000; };
+MockSheet.prototype.setFrozenRows = function () {};
+MockSheet.prototype.deleteRow = function (r) { this.rows.splice(r - 1, 1); };
+function MockSS() { this.sheets = [new MockSheet('Sheet1')]; }
+MockSS.prototype.getSheetByName = function (n) { return this.sheets.filter(function (s) { return s.name === n; })[0] || null; };
+MockSS.prototype.insertSheet = function (n) { var s = new MockSheet(n); this.sheets.push(s); return s; };
+MockSS.prototype.getSheets = function () { return this.sheets; };
+MockSS.prototype.deleteSheet = function (s) { this.sheets = this.sheets.filter(function (x) { return x !== s; }); };
+MockSS.prototype.getId = function () { return 'mock-ss-id'; };
+var THE_SS = new MockSS();
+var SpreadsheetApp = { getActiveSpreadsheet: function () { return THE_SS; }, openById: function () { return THE_SS; } };
+var PROPS = {};
+var PropertiesService = { getScriptProperties: function () { return { getProperty: function (k) { return PROPS[k] || null; }, setProperty: function (k, v) { PROPS[k] = v; } }; } };
+var LOCKS = { held: 0, max: 0, total: 0 };
+var LockService = { getScriptLock: function () { return { waitLock: function () { LOCKS.held++; LOCKS.total++; LOCKS.max = Math.max(LOCKS.max, LOCKS.held); }, releaseLock: function () { LOCKS.held--; } }; } };
+var Utilities = { getUuid: function () { return crypto.randomUUID(); } };
+var ContentService = { MimeType: { JSON: 'json' }, createTextOutput: function (s) { return { s: s, setMimeType: function () { return this; }, getContent: function () { return this.s; } }; } };
+var UrlFetchApp = { fetch: function () { return { getContentText: function () { return window.__VOCAB_TEXT; } }; } };
+</script>
+<script src="../docs/js/sha256.js"></script>
+<script src="../docs/js/core.js"></script>
+<script src="../backend/Store.gs"></script>
+<script src="../backend/Code.gs"></script>
+<script src="../backend/Setup.gs"></script>
+<script src="../docs/js/seed_examples.js"></script>
+<script>
+var results = [], current = '';
+function group(name) { current = name; var h = document.createElement('h2'); h.textContent = name; document.getElementById('out').appendChild(h); }
+function check(name, cond, detail) {
+  results.push({ ok: !!cond });
+  var d = document.createElement('div'); d.className = cond ? 'ok' : 'bad';
+  d.textContent = (cond ? '✔ ' : '✘ ') + name + (cond ? '' : '  → ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)));
+  document.getElementById('out').appendChild(d);
+}
+function eq(name, a, b) { check(name, JSON.stringify(a) === JSON.stringify(b), '받은 값 ' + JSON.stringify(a) + ' / 기대 ' + JSON.stringify(b)); }
+
+/* 웹으로 보내는 것과 똑같이 doPost 를 부른다 */
+function post(action, payload, token, rid) {
+  var out = doPost({ postData: { contents: JSON.stringify({ action: action, token: token || null, payload: payload || {}, req_id: rid }) } });
+  return JSON.parse(out.getContent());
+}
+function must(action, payload, token, rid) { var r = post(action, payload, token, rid); if (!r.ok) throw new Error(action + ': ' + r.error.code + ' ' + r.error.message); return r.data; }
+function code(r) { return r.ok ? 'OK' : r.error.code; }
+
+async function main() {
+  window.__VOCAB_TEXT = await (await fetch('../docs/data/vocab.json')).text();
+  CONFIG.SEED_URL = 'http://mock/vocab.json';
+
+  group('설치 (setup)');
+  setup();
+  var ss = THE_SS;
+  check('표 19개가 만들어지고 첫 줄이 열 제목이다', VocabCore.TABLES && Object.keys(VocabCore.TABLES).every(function (t) { var sh = ss.getSheetByName(t); return sh && sh.rows[0] && sh.rows[0][0] === VocabCore.colName(VocabCore.TABLES[t][0]); }));
+  check('기본 시트(Sheet1)는 지워진다', !ss.getSheetByName('Sheet1'));
+  eq('어휘 410개(학교 103 + 국가 307)가 들어갔다', ss.getSheetByName('Vocabulary').getLastRow() - 1, 410);
+  eq('작문 장면 309개', ss.getSheetByName('WritingPrompts').getLastRow() - 1, 309);
+  check('예시 문장이 서버 표에 들어갔다', ss.getSheetByName('WritingPrompts').rows.slice(1).filter(function (r) { return r[5]; }).length === 309);
+  check('교사 초대 코드가 실행 로그에 나온다', LOG.some(function (l) { return /초대 코드: [A-Z0-9]{4}-[A-Z0-9]{4}/.test(l); }), LOG);
+  check('비밀값(PEPPER)이 스크립트 속성에 만들어진다', (PROPS.PEPPER || '').length === 64);
+  check('코드·시트 어디에도 평문 초대 코드가 남지 않는다', (function () { var code0 = /초대 코드: ([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(LOG.join('\n'))[1]; return JSON.stringify(ss.getSheetByName('Users').rows).indexOf(code0) < 0; })());
+  var before = ss.getSheetByName('Vocabulary').getLastRow();
+  setup();
+  eq('setup 을 다시 실행해도 어휘가 중복으로 들어가지 않는다', ss.getSheetByName('Vocabulary').getLastRow(), before);
+
+  group('doPost 를 통한 전체 흐름');
+  var inv = /초대 코드: ([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(LOG.join('\n'))[1];
+  var tses = must('auth.activate', { login_id: CONFIG.TEACHER_ID, invite_code: inv, new_password: 'teacher-pass-1' });
+  var T = tses.token;
+  eq('교사 로그인', tses.user.role, 'teacher');
+  var cls = must('class.create', { school_year: 2027, grade: 2, class_name: '3반' }, T);
+  eq('학급을 만들면 34개 차시 줄이 생긴다', ss.getSheetByName('Lessons').getLastRow() - 1, 34);
+  eq('숫자 열(학년도)이 숫자로 읽힌다', ss.getSheetByName('Classes').rows[1][1], 2027);
+  var made = must('student.create', { class_id: cls.class_id, students: [{ no: 1, name: '가' }, { no: 2, name: '나' }] }, T);
+  var A = must('auth.activate', { login_id: made[0].login_id, invite_code: made[0].invite_code, new_password: 'pw-a-1234' }).token;
+  var B = must('auth.activate', { login_id: made[1].login_id, invite_code: made[1].invite_code, new_password: 'pw-b-1234' }).token;
+  check('비밀번호는 시트에 해시로만 있다', JSON.stringify(ss.getSheetByName('Users').rows).indexOf('pw-a-1234') < 0);
+  check('로그인 토큰도 시트에는 해시로만 있다', JSON.stringify(ss.getSheetByName('Sessions').rows).indexOf(A) < 0);
+
+  var V = 'V-S025';
+  var w1 = must('writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '시트에 저장되는 첫 문장입니다.', mode: 'SUBMIT' }, A, 'rq1');
+  var w1b = must('writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '시트에 저장되는 첫 문장입니다.', mode: 'SUBMIT' }, A, 'rq1');
+  check('같은 요청 번호로 두 번 보내도 한 번만 저장된다', w1.writing_id === w1b.writing_id && ss.getSheetByName('WritingRevisions').getLastRow() - 1 === 1);
+  var w2 = must('writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '고쳐서 다시 낸 문장입니다.', mode: 'SUBMIT', base_rev: w1.rev }, A);
+  eq('수정 이력이 시트에 두 줄로 남는다', ss.getSheetByName('WritingRevisions').getLastRow() - 1, 2);
+  eq('낡은 base_rev 는 충돌로 거절된다', code(post('writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '낡은 화면의 글입니다 정말로.', mode: 'DRAFT', base_rev: w1.rev }, A)), 'CONFLICT');
+  var snapA = must('sync', {}, A), snapB = must('sync', {}, B);
+  check('A 의 sync 에는 숫자·JSON 열이 올바른 타입으로 돌아온다', snapA.writings.length === 1 && snapA.writings[0].version === 2 && typeof snapA.writings[0].rev === 'number' && typeof snapA.writings[0].self_check === 'object');
+  eq('B 에게는 A 의 문장이 보이지 않는다', snapB.writings.length, 0);
+  eq('B 가 A 의 문장 이력을 요청하면 «없음»', code(post('writing.revisions', { writing_id: w1.writing_id }, B)), 'NOT_FOUND');
+  eq('토큰 없이 요청', code(post('sync', {}, null)), 'UNAUTHENTICATED');
+  must('sv.save', { vocabulary_id: V, guessed_meaning: '앞뒤 흐름', mark: ['define'] }, A);
+  check('steps(JSON 칸)가 시트에 문자열로 저장되고 객체로 되돌아온다', typeof ss.getSheetByName('StudentVocabulary').rows[1][4] === 'string' && must('sync', {}, A).sv[0].steps.define === true);
+  check('한글·줄바꿈이 있는 글도 그대로 저장된다', (function () { var t = '첫 줄\n둘째 줄 "따옴표" , 쉼표'; must('daily.save', { date: '2027-03-02', text: t }, A); return must('sync', {}, A).daily[0].text === t; })());
+  check('날짜 모양의 글자(2027-03-02)가 날짜로 바뀌지 않고 글자로 남는다', typeof ss.getSheetByName('DailySentences').rows[1][2] === 'string');
+
+  group('행 지우기와 복원');
+  must('student.purge', { user_id: made[1].user_id, confirm: made[1].login_id }, T);
+  eq('학생 삭제 후 해당 계정이 시트에서 사라진다', ss.getSheetByName('Users').rows.filter(function (r) { return r[2] === made[1].login_id; }).length, 0);
+  eq('삭제한 학생의 토큰은 더 이상 통하지 않는다', code(post('sync', {}, B)), 'UNAUTHENTICATED');
+  eq('다른 학생 A 의 기록은 그대로다', must('sync', {}, A).writings.length, 1);
+  var bk = must('backup.export', {}, T);
+  check('백업이 시트의 내용을 담고 있다', bk.data.Users.length === 1 && bk.data.Writings.length === 1);
+
+  group('잠금(동시 저장 방지)');
+  check('쓰기 요청은 매번 잠금을 잡고 풀어 준다(남은 잠금 0)', LOCKS.total > 10 && LOCKS.held === 0, LOCKS);
+
+  group('교사 초대 코드 재발급');
+  LOG.length = 0; newTeacherCode();
+  check('새 코드가 로그에 나온다', LOG.some(function (l) { return /새 초대 코드: [A-Z0-9]{4}-[A-Z0-9]{4}/.test(l); }), LOG);
+  eq('재발급 뒤 옛 비밀번호로는 로그인되지 않는다', code(post('auth.login', { login_id: CONFIG.TEACHER_ID, password: 'teacher-pass-1' })), 'NOT_ACTIVATED');
+  var inv2 = /새 초대 코드: ([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(LOG.join('\n'))[1];
+  eq('새 코드로 다시 비밀번호를 만들면 로그인된다', code(post('auth.activate', { login_id: CONFIG.TEACHER_ID, invite_code: inv2, new_password: 'teacher-pass-2' })), 'OK');
+  eq('doPost 는 이상한 본문에도 서버 오류 대신 안전한 응답을 낸다', JSON.parse(doPost({ postData: { contents: '{깨진 JSON' } }).getContent()).ok, false);
+  eq('doGet 은 데이터를 돌려주지 않는다', Object.keys(JSON.parse(doGet().getContent())).sort().join(), 'ok,service,version');
+
+  var bad = results.filter(function (r) { return !r.ok; });
+  var sum = document.getElementById('sum');
+  sum.textContent = (bad.length ? '✘ 실패 ' + bad.length + '건 / ' : '✔ 모두 통과 · ') + '검사 ' + results.length + '개';
+  sum.className = bad.length ? 'bad' : 'ok';
+  window.__done = { total: results.length, failed: bad.length };
+}
+main().catch(function (e) { document.getElementById('sum').textContent = '실행 오류: ' + e.message; document.getElementById('sum').className = 'bad'; console.error(e); window.__done = { error: String(e.stack || e) }; });
+</script>
+</body>
+</html>

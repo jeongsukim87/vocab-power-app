@@ -1,0 +1,1755 @@
+/* 자동 생성 파일 — 직접 고치지 마세요. (tools/bundle_gas.py)
+   Apps Script 편집기의 Code.gs 에 이 파일 내용을 통째로 붙여 넣습니다. */
+
+/* ================================================================
+   Sha256.gs
+   ================================================================ */
+/**
+ * 순수 JavaScript SHA-256 (UTF-8 문자열 → 16진수).
+ * Apps Script 의 Utilities.computeDigest 는 호출마다 시간이 걸려 비밀번호를 여러 번 되풀이 해시하기엔 느리다.
+ * 이 파일은 구글 서버와 브라우저 체험 모드에서 똑같이 쓰인다. (docs/js/sha256.js 는 이 파일의 복사본)
+ */
+var sha256Hex = (function () {
+  'use strict';
+  var K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+  var HEX = '0123456789abcdef';
+
+  function utf8(str) {
+    var out = [];
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) { // 서로게이트 쌍
+        var d = str.charCodeAt(i + 1);
+        if (d >= 0xdc00 && d <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00); i++; }
+      }
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return out;
+  }
+
+  var W = new Uint32Array(64);
+  function sha256Hex(str) {
+    var bytes = utf8(String(str));
+    var len = bytes.length;
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    var hi = Math.floor((len * 8) / 0x100000000), lo = (len * 8) >>> 0;
+    bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    var h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a, h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+    for (var off = 0; off < bytes.length; off += 64) {
+      var i;
+      for (i = 0; i < 16; i++) W[i] = (bytes[off + 4 * i] << 24) | (bytes[off + 4 * i + 1] << 16) | (bytes[off + 4 * i + 2] << 8) | bytes[off + 4 * i + 3];
+      for (i = 16; i < 64; i++) {
+        var a15 = W[i - 15], a2 = W[i - 2];
+        var s0 = ((a15 >>> 7) | (a15 << 25)) ^ ((a15 >>> 18) | (a15 << 14)) ^ (a15 >>> 3);
+        var s1 = ((a2 >>> 17) | (a2 << 15)) ^ ((a2 >>> 19) | (a2 << 13)) ^ (a2 >>> 10);
+        W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+      }
+      var a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+      for (i = 0; i < 64; i++) {
+        var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        var ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K[i] + W[i]) | 0;
+        var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        var maj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + maj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0;
+    }
+    var out = '', hs = [h0, h1, h2, h3, h4, h5, h6, h7];
+    for (var j = 0; j < 8; j++) for (var k = 28; k >= 0; k -= 4) out += HEX.charAt((hs[j] >>> k) & 15);
+    return out;
+  }
+  return sha256Hex;
+})();
+
+/* ================================================================
+   Core.gs
+   ================================================================ */
+/**
+ * 힘이 되는 학습도구어 — 서버 핵심 로직 (저장소와 무관한 순수 JavaScript)
+ *
+ *  · Google Apps Script 에서는 이 파일이 그대로 Core.gs 로 올라가고, SheetsStore(Store.gs) 가 저장을 맡는다.
+ *  · 브라우저 «체험 모드» 에서는 docs/js/core.js (이 파일의 복사본)를 불러와 localStorage 저장소를 쓴다.
+ *  · 인증·권한·저장 규칙을 한 곳에만 두기 위해 두 환경이 같은 코드를 쓴다. (복사: tools/sync_core.py)
+ *
+ * env(환경) 로 받는 것:
+ *   store            { all(t), get(t,id), insert(t,row), update(t,id,patch), remove(t,id), ensure() }
+ *   sha256Hex(str)   동기 SHA-256 (16진수 문자열)
+ *   randomHex(n)     암호학적 난수 n바이트의 16진수
+ *   now()            ISO 시각 문자열
+ *   lock(fn)         한 번에 한 요청만 쓰게 하는 잠금 (fn 을 실행하고 결과를 돌려준다)
+ *   pepper           비밀번호·토큰 해시에 섞는 서버 비밀값 (코드에 적지 않고 스크립트 속성에 둔다)
+ *   log(e)           오류 기록(선택)
+ */
+var VocabCore = (function () {
+  'use strict';
+
+  var C = {
+    LESSONS: 34,
+    HASH_ROUNDS: 10000,
+    SESSION_HOURS: { student: 8, teacher: 4 },
+    SESSION_MAX_HOURS: 24,
+    MAX_FAILS: 5,
+    LOCK_MINUTES: 10,
+    INVITE_DAYS: 14,
+    TEXT_MAX: 2000,
+    SHORT_MAX: 200,
+    REQLOG_MINUTES: 30,
+    MIN_PW: { student: 6, teacher: 10 }
+  };
+
+  /* ------------------------------------------------------------------ 표(시트) 정의
+   * 열 이름 뒤 ":n" 은 숫자, ":j" 는 JSON 문자열(저장 시 문자열, 읽을 때 객체). 첫 열이 기본키. */
+  var TABLES = {
+    Users: ['user_id', 'role', 'login_id', 'display_name', 'class_id', 'student_no:n', 'credential_hash', 'salt',
+      'invite_hash', 'invite_expires', 'status', 'failed_count:n', 'locked_until', 'created_at', 'last_login_at'],
+    Classes: ['class_id', 'school_year:n', 'grade:n', 'class_name', 'teacher_id', 'created_at'],
+    Sessions: ['token_hash', 'user_id', 'role', 'created_at', 'expires_at'],
+    Vocabulary: ['vocabulary_id', 'headword', 'normalized_headword', 'sense_id', 'definition', 'definition_status',
+      'semantic_category', 'origin', 'subject', 'edited_at', 'edited_by'],
+    VocabularySources: ['source_id', 'vocabulary_id', 'source_type', 'original_entry_id', 'subject', 'publisher', 'page',
+      'permission_status'],
+    VocabularyRelations: ['relation_id', 'from_vocabulary_id', 'to_vocabulary_id', 'relation_type', 'status'],
+    Lessons: ['lesson_id', 'class_id', 'lesson_number:n', 'title', 'goals', 'published:n', 'due_date'],
+    LessonVocabulary: ['lv_id', 'class_id', 'lesson_number:n', 'vocabulary_id', 'required:n', 'sort:n'],
+    LearningActivities: ['activity_id', 'vocabulary_id', 'type', 'prompt', 'answer_key', 'content_status', 'created_by',
+      'created_at'],
+    StudentVocabulary: ['sv_id', 'user_id', 'vocabulary_id', 'progress_status', 'steps:j', 'textbook_sentence',
+      'guessed_meaning', 'self_explanation', 'comprehension_level:n', 'box:n', 'next_review_at', 'last_studied_at',
+      'rev:n', 'updated_at'],
+    PersonalCollections: ['collection_id', 'user_id', 'headword', 'normalized_headword', 'vocabulary_id', 'duplicate_of',
+      'discovered_at', 'medium', 'source_context', 'guessed_meaning', 'confirmed_meaning', 'self_explanation',
+      'example_sentence', 'subject', 'tags', 'related_words', 'favorite:n', 'status', 'trashed_at', 'share_status',
+      'share_note', 'rev:n', 'created_at', 'updated_at'],
+    WritingPrompts: ['prompt_id', 'vocabulary_id', 'scene_type', 'scenario', 'guiding_question', 'example',
+      'content_status', 'origin', 'edited_at', 'edited_by'],
+    Writings: ['writing_id', 'user_id', 'vocabulary_id', 'scene_type', 'draft_text', 'text', 'status', 'version:n',
+      'self_check:j', 'example_viewed:n', 'rev:n', 'created_at', 'saved_at', 'submitted_at', 'featured:n'],
+    WritingRevisions: ['revision_id', 'writing_id', 'user_id', 'version:n', 'text', 'saved_at'],
+    DailySentences: ['daily_id', 'user_id', 'date', 'text', 'vocabulary_id', 'rev:n', 'created_at', 'updated_at',
+      'deleted:n'],
+    ReviewRecords: ['review_id', 'user_id', 'vocabulary_id', 'mode', 'result', 'detail', 'created_at'],
+    TeacherFeedback: ['feedback_id', 'target_id', 'target_type', 'student_id', 'teacher_id', 'comment', 'rubric:j',
+      'created_at', 'updated_at', 'read_at'],
+    AuditLogs: ['log_id', 'actor_id', 'action', 'target_id', 'detail', 'created_at'],
+    ReqLog: ['req_id', 'user_id', 'response', 'created_at']
+  };
+
+  var RUBRIC = ['accuracy', 'context', 'clarity', 'own_thought', 'transfer'];
+  var RUBRIC_LABEL = { accuracy: '의미 정확성', context: '문맥 적절성', clarity: '표현 명료성',
+    own_thought: '자기 생각', transfer: '새 맥락 전이' };
+  var SCENES = ['SUBJECT', 'DAILY', 'WORLD'];
+  var SCENE_LABEL = { SUBJECT: '교과 속에서', DAILY: '일상 속에서', WORLD: '세상 속에서' };
+
+  function colName(c) { return c.split(':')[0]; }
+  function colType(c) { return c.indexOf(':') < 0 ? 's' : c.split(':')[1]; }
+  function keyOf(table) { return colName(TABLES[table][0]); }
+
+  /** 객체 → 저장용 배열(열 순서). 숫자·JSON 열을 맞춰 준다. */
+  function toRow(table, obj) {
+    return TABLES[table].map(function (c) {
+      var v = obj[colName(c)], t = colType(c);
+      if (v === undefined || v === null) return t === 'n' ? '' : '';
+      if (t === 'j') return typeof v === 'string' ? v : JSON.stringify(v);
+      return v;
+    });
+  }
+  /** 저장된 배열 → 객체 */
+  function fromRow(table, arr) {
+    var o = {};
+    TABLES[table].forEach(function (c, i) {
+      var v = arr[i], t = colType(c);
+      if (t === 'n') o[colName(c)] = (v === '' || v === null || v === undefined) ? 0 : Number(v);
+      else if (t === 'j') { try { o[colName(c)] = (v === '' || v == null) ? null : (typeof v === 'string' ? JSON.parse(v) : v); } catch (e) { o[colName(c)] = null; } }
+      else o[colName(c)] = (v === null || v === undefined) ? '' : String(v);
+    });
+    return o;
+  }
+
+  /* ------------------------------------------------------------------ 오류·검증 도구 */
+  function fail(code, message, data) { var e = new Error(message); e.code = code; e.data = data; throw e; }
+  function isStr(v) { return typeof v === 'string'; }
+  function str(v, max, name, opt) {
+    if (v === undefined || v === null || v === '') { if (opt) return ''; fail('BAD_REQUEST', (name || '값') + '이(가) 비어 있습니다.'); }
+    if (!isStr(v)) fail('BAD_REQUEST', (name || '값') + ' 형식이 올바르지 않습니다.');
+    if (v.length > (max || C.SHORT_MAX)) fail('BAD_REQUEST', (name || '값') + '이(가) 너무 깁니다.');
+    return v;
+  }
+  function oneOf(v, list, name) { if (list.indexOf(v) < 0) fail('BAD_REQUEST', (name || '값') + '이(가) 올바르지 않습니다.'); return v; }
+  function int(v, min, max, name) {
+    var n = Number(v);
+    if (!isFinite(n) || Math.floor(n) !== n || n < min || n > max) fail('BAD_REQUEST', (name || '숫자') + ' 범위가 올바르지 않습니다.');
+    return n;
+  }
+  function norm(s) { return String(s || '').normalize('NFC').replace(/\s+/g, '').toLowerCase(); }
+  function trim(s) { return String(s || '').replace(/^\s+|\s+$/g, ''); }
+  function csvSafe(v) { var s = String(v == null ? '' : v); return /^[=+\-@\t\r]/.test(s) ? "'" + s : s; }
+  function pick(o, keys) { var r = {}; keys.forEach(function (k) { if (o[k] !== undefined) r[k] = o[k]; }); return r; }
+  function minutesFrom(iso, m) { return new Date(new Date(iso).getTime() + m * 60000).toISOString(); }
+  function hoursFrom(iso, h) { return minutesFrom(iso, h * 60); }
+
+  /* ------------------------------------------------------------------ 학습 진행 규칙 (서버·화면 공용) */
+  var STEP_KEYS = ['confirm', 'context', 'infer', 'define', 'explain', 'related'];
+
+  /** 본문(글) 단계는 글자 수로, 보기 단계는 표시 여부로 계산한다. */
+  function computeSteps(sv, prev) {
+    var s = {};
+    STEP_KEYS.forEach(function (k) { s[k] = !!(prev && prev[k]); });
+    s.transfer = !!(prev && prev.transfer);
+    s.context = trim(sv.textbook_sentence).length >= 5;
+    s.infer = trim(sv.guessed_meaning).length >= 2;
+    s.explain = trim(sv.self_explanation).length >= 10;
+    return s;
+  }
+
+  function submittedScenes(writings) {
+    var set = {};
+    (writings || []).forEach(function (w) { if (w.version > 0 && trim(w.text)) set[w.scene_type] = true; });
+    return set;
+  }
+
+  /**
+   * 어휘 하나의 학습 상태.
+   * origin: SCHOOL | NATIONAL | PERSONAL
+   * 완료 조건
+   *   SCHOOL   : 교과서 문장·짐작·뜻 확인·자기 설명·관련어 탐색 + 세 장면 모두 제출
+   *   NATIONAL : 확인·짐작·이해(뜻 확인)·확장(관련어 탐색) + 새 문장 1개 이상 제출
+   *   PERSONAL : 확인한 뜻·자기 설명 입력 + 새 문장 1개 이상 제출
+   */
+  function vocabStatus(origin, sv, writings, extra) {
+    var st = (sv && sv.steps) || {};
+    var sc = submittedScenes(writings);
+    var nScenes = Object.keys(sc).length;
+    var done, total, got;
+    if (origin === 'SCHOOL') {
+      var need = ['context', 'infer', 'define', 'explain', 'related'];
+      got = need.filter(function (k) { return st[k]; }).length + nScenes;
+      total = need.length + 3;
+    } else if (origin === 'NATIONAL') {
+      var need2 = ['confirm', 'infer', 'define', 'related'];
+      got = need2.filter(function (k) { return st[k]; }).length + (nScenes > 0 ? 1 : 0);
+      total = need2.length + 1;
+    } else {
+      var p = extra || {};
+      got = (p.confirmed ? 1 : 0) + (p.explained ? 1 : 0) + (nScenes > 0 ? 1 : 0);
+      total = 3;
+    }
+    done = got === total;
+    // 능동 어휘 습득: 이해·독립적 설명·문장 작성·새 맥락 적용 네 가지를 구분해서 본다 (문장 수만으로 판정하지 않는다)
+    var level = {
+      understand: !!(st.define && st.infer),
+      explain: trim(sv && sv.self_explanation).length >= 10,
+      write: nScenes > 0,
+      transfer: !!st.transfer || nScenes >= 2
+    };
+    level.active = level.understand && level.explain && level.write && level.transfer;
+    return { done: done, got: got, total: total, scenes: sc, level: level };
+  }
+
+  var BOX_DAYS = [0, 1, 2, 4, 8, 16];
+  function nextReview(box, now) { return minutesFrom(now, BOX_DAYS[Math.max(1, Math.min(5, box))] * 24 * 60); }
+
+  /* ------------------------------------------------------------------ 코어 */
+  function create(env) {
+    var store = env.store;
+    var pepper = env.pepper || '';
+    var H = {}; // action → {auth, write, fn}
+
+    /* ---------- 저장소 도우미 ---------- */
+    function all(t) { return store.all(t); }
+    function where(t, pred) { return all(t).filter(pred); }
+    function get(t, id) { return store.get(t, id); }
+    function uid(prefix) { return prefix + '-' + env.randomHex(8); }
+    function nowIso() { return env.now(); }
+    function audit(actor, action, target, detail) {
+      store.insert('AuditLogs', { log_id: uid('L'), actor_id: actor || '', action: action, target_id: target || '',
+        detail: detail || '', created_at: nowIso() });
+    }
+
+    /* ---------- 비밀번호·토큰 ---------- */
+    function hashSecret(secret, salt) {
+      var h = env.sha256Hex(pepper + '|' + salt + '|' + secret);
+      for (var i = 0; i < C.HASH_ROUNDS; i++) h = env.sha256Hex(h + salt + secret);
+      return h;
+    }
+    function sameStr(a, b) { // 시간차 공격을 줄이기 위해 끝까지 비교
+      if (a.length !== b.length) return false;
+      var r = 0; for (var i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+      return r === 0;
+    }
+    function tokenHash(token) { return env.sha256Hex('tok|' + pepper + '|' + token); }
+    var INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    function newInviteCode() {
+      var hex = env.randomHex(8), code = '';
+      for (var i = 0; i < 8; i++) code += INVITE_ALPHABET.charAt(parseInt(hex.substr(i * 2, 2), 16) % INVITE_ALPHABET.length);
+      return code.substr(0, 4) + '-' + code.substr(4);
+    }
+    function normInvite(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+    function checkPassword(pw, role, loginId) {
+      if (!isStr(pw)) fail('BAD_REQUEST', '비밀번호를 입력해 주세요.');
+      var min = C.MIN_PW[role] || 6;
+      if (pw.length < min) fail('WEAK_PASSWORD', '비밀번호는 ' + min + '자 이상이어야 합니다.');
+      if (pw.length > 100) fail('WEAK_PASSWORD', '비밀번호가 너무 깁니다.');
+      if (loginId && pw.toLowerCase() === String(loginId).toLowerCase()) fail('WEAK_PASSWORD', '아이디와 같은 비밀번호는 쓸 수 없습니다.');
+      if (/^(.)\1+$/.test(pw)) fail('WEAK_PASSWORD', '같은 글자만 반복한 비밀번호는 쓸 수 없습니다.');
+    }
+
+    function publicUser(u) {
+      return { user_id: u.user_id, role: u.role, login_id: u.login_id, display_name: u.display_name,
+        class_id: u.class_id, student_no: u.student_no };
+    }
+
+    function openSession(u) {
+      var now = nowIso();
+      // 만료된 세션 정리
+      where('Sessions', function (s) { return s.expires_at < now; }).forEach(function (s) { store.remove('Sessions', s.token_hash); });
+      var token = env.randomHex(24);
+      store.insert('Sessions', { token_hash: tokenHash(token), user_id: u.user_id, role: u.role, created_at: now,
+        expires_at: hoursFrom(now, C.SESSION_HOURS[u.role] || 4) });
+      store.update('Users', u.user_id, { last_login_at: now, failed_count: 0, locked_until: '' });
+      return { token: token, user: publicUser(u), expires_at: hoursFrom(now, C.SESSION_HOURS[u.role] || 4) };
+    }
+
+    function authenticate(token) {
+      if (!isStr(token) || token.length < 20 || token.length > 200) fail('UNAUTHENTICATED', '로그인이 필요합니다.');
+      var s = get('Sessions', tokenHash(token));
+      if (!s) fail('UNAUTHENTICATED', '로그인이 필요합니다.');
+      var now = nowIso();
+      if (s.expires_at < now || hoursFrom(s.created_at, C.SESSION_MAX_HOURS) < now) fail('SESSION_EXPIRED', '로그인 시간이 끝났습니다. 다시 로그인해 주세요.');
+      var u = get('Users', s.user_id);
+      if (!u || u.status !== 'ACTIVE') fail('UNAUTHENTICATED', '사용할 수 없는 계정입니다.');
+      return { user: u, session: s };
+    }
+
+    /* ---------- 권한 도우미 ---------- */
+    function requireTeacherOfClass(user, classId) {
+      var c = classId && get('Classes', classId);
+      if (!c || c.teacher_id !== user.user_id) fail('FORBIDDEN', '이 학급에 대한 권한이 없습니다.');
+      return c;
+    }
+    function requireTeacherOfStudent(teacher, studentId) {
+      var s = studentId && get('Users', studentId);
+      if (!s || s.role !== 'student') fail('NOT_FOUND', '학생을 찾을 수 없습니다.');
+      requireTeacherOfClass(teacher, s.class_id);
+      return s;
+    }
+    function ownOr404(row, user) { // 학생 본인 기록만. 남의 것이면 «없음» 으로 답해 존재 여부도 알려 주지 않는다.
+      if (!row || row.user_id !== user.user_id) fail('NOT_FOUND', '기록을 찾을 수 없습니다.');
+      return row;
+    }
+    function vocabExists(id, user) {
+      if (get('Vocabulary', id)) return true;
+      var pc = get('PersonalCollections', id);
+      return !!(pc && user && pc.user_id === user.user_id);
+    }
+    function originOf(vid) {
+      var v = get('Vocabulary', vid);
+      return v ? v.origin : 'PERSONAL';
+    }
+
+    /* ---------- 정의: 엔드포인트 등록 ---------- */
+    function def(name, opt, fn) { H[name] = { auth: opt.auth || 'student', write: !!opt.write, fn: fn }; }
+
+    /* ================================================================= 인증 */
+    def('auth.login', { auth: 'none', write: true }, function (ctx, p) {
+      var loginId = str(p.login_id, 40, '아이디').toLowerCase();
+      var pw = str(p.password, 100, '비밀번호');
+      var u = where('Users', function (x) { return x.login_id.toLowerCase() === loginId; })[0];
+      var now = nowIso();
+      var bad = function () { fail('LOGIN_FAILED', '아이디 또는 비밀번호가 맞지 않습니다.'); };
+      if (!u || u.status !== 'ACTIVE') { hashSecret(pw, 'dummy'); bad(); } // 존재 여부가 시간으로 드러나지 않게
+      if (u.locked_until && u.locked_until > now) fail('LOCKED', '로그인에 여러 번 실패해서 잠시 잠겼습니다. ' + C.LOCK_MINUTES + '분 뒤에 다시 해 보세요.');
+      if (!u.credential_hash) fail('NOT_ACTIVATED', '아직 비밀번호를 만들지 않았습니다. «처음 오셨나요?» 에서 초대 코드로 시작해 주세요.');
+      if (!sameStr(hashSecret(pw, u.salt), u.credential_hash)) {
+        var n = (u.failed_count || 0) + 1;
+        store.update('Users', u.user_id, { failed_count: n, locked_until: n >= C.MAX_FAILS ? minutesFrom(now, C.LOCK_MINUTES) : '' });
+        audit(u.user_id, 'login_failed', u.user_id, '');
+        bad();
+      }
+      audit(u.user_id, 'login', u.user_id, '');
+      return openSession(u);
+    });
+
+    def('auth.activate', { auth: 'none', write: true }, function (ctx, p) {
+      var loginId = str(p.login_id, 40, '아이디').toLowerCase();
+      var code = normInvite(str(p.invite_code, 20, '초대 코드'));
+      var u = where('Users', function (x) { return x.login_id.toLowerCase() === loginId; })[0];
+      var now = nowIso();
+      var bad = function () { fail('INVITE_INVALID', '아이디 또는 초대 코드가 맞지 않거나 기간이 지났습니다. 선생님께 새 코드를 받아 주세요.'); };
+      if (!u || u.status !== 'ACTIVE' || !u.invite_hash || !u.invite_expires || u.invite_expires < now) bad();
+      if (u.locked_until && u.locked_until > now) fail('LOCKED', '잠시 잠겼습니다. ' + C.LOCK_MINUTES + '분 뒤에 다시 해 보세요.');
+      if (!sameStr(hashSecret(code, u.salt), u.invite_hash)) {
+        var n = (u.failed_count || 0) + 1;
+        store.update('Users', u.user_id, { failed_count: n, locked_until: n >= C.MAX_FAILS ? minutesFrom(now, C.LOCK_MINUTES) : '' });
+        bad();
+      }
+      checkPassword(p.new_password, u.role, u.login_id);
+      var salt = env.randomHex(16);
+      store.update('Users', u.user_id, { salt: salt, credential_hash: hashSecret(p.new_password, salt), invite_hash: '', invite_expires: '', failed_count: 0 });
+      audit(u.user_id, 'activate', u.user_id, '');
+      return openSession(get('Users', u.user_id));
+    });
+
+    def('auth.logout', { auth: 'any', write: true }, function (ctx) {
+      store.remove('Sessions', ctx.session.token_hash);
+      return { bye: true };
+    });
+
+    def('auth.change_password', { auth: 'any', write: true }, function (ctx, p) {
+      var u = ctx.user;
+      if (!sameStr(hashSecret(str(p.old_password, 100, '현재 비밀번호'), u.salt), u.credential_hash)) fail('LOGIN_FAILED', '현재 비밀번호가 맞지 않습니다.');
+      checkPassword(p.new_password, u.role, u.login_id);
+      var salt = env.randomHex(16);
+      store.update('Users', u.user_id, { salt: salt, credential_hash: hashSecret(p.new_password, salt) });
+      // 다른 기기의 로그인은 모두 끊는다 (지금 쓰는 세션만 남김)
+      where('Sessions', function (s) { return s.user_id === u.user_id && s.token_hash !== ctx.session.token_hash; })
+        .forEach(function (s) { store.remove('Sessions', s.token_hash); });
+      audit(u.user_id, 'change_password', u.user_id, '');
+      return { changed: true };
+    });
+
+    def('auth.me', { auth: 'any' }, function (ctx) { return { user: publicUser(ctx.user), expires_at: ctx.session.expires_at }; });
+
+    /* ================================================================= 학생: 동기화(한 번에 내 기록 전부) */
+    function lessonsForClass(classId, onlyPublished) {
+      var ls = where('Lessons', function (l) { return l.class_id === classId && (!onlyPublished || l.published); });
+      var lv = where('LessonVocabulary', function (x) { return x.class_id === classId; });
+      var pubSet = {}; ls.forEach(function (l) { pubSet[l.lesson_number] = true; });
+      return ls.sort(function (a, b) { return a.lesson_number - b.lesson_number; }).map(function (l) {
+        return Object.assign({}, l, {
+          vocab: lv.filter(function (x) { return x.lesson_number === l.lesson_number; })
+            .sort(function (a, b) { return a.sort - b.sort; })
+            .map(function (x) { return { vocabulary_id: x.vocabulary_id, required: x.required }; })
+        });
+      });
+    }
+
+    function contentDelta() {
+      return {
+        vocabulary: where('Vocabulary', function (v) { return v.origin === 'CUSTOM' || v.edited_at; }),
+        prompts: where('WritingPrompts', function (p) { return p.origin === 'CUSTOM' || p.edited_at; }),
+        activities: all('LearningActivities').map(function (a) { return pick(a, ['activity_id', 'vocabulary_id', 'type', 'prompt', 'content_status']); })
+      };
+    }
+
+    function studentSnapshot(user) {
+      var uidv = user.user_id;
+      var cls = user.class_id ? get('Classes', user.class_id) : null;
+      var myWritings = where('Writings', function (w) { return w.user_id === uidv; });
+      return {
+        user: publicUser(user),
+        class: cls ? pick(cls, ['class_id', 'school_year', 'grade', 'class_name']) : null,
+        lessons: user.class_id ? lessonsForClass(user.class_id, true) : [],
+        sv: where('StudentVocabulary', function (x) { return x.user_id === uidv; }),
+        collections: where('PersonalCollections', function (x) { return x.user_id === uidv; }),
+        writings: myWritings,
+        daily: where('DailySentences', function (x) { return x.user_id === uidv && !x.deleted; }),
+        reviews: where('ReviewRecords', function (x) { return x.user_id === uidv; }).slice(-300),
+        feedback: where('TeacherFeedback', function (x) { return x.student_id === uidv; }),
+        shared: user.class_id ? sharedWords(user.class_id) : [],
+        delta: contentDelta(),
+        server_time: nowIso()
+      };
+    }
+
+    function sharedWords(classId) {
+      var members = {};
+      where('Users', function (u) { return u.class_id === classId && u.role === 'student'; }).forEach(function (u) { members[u.user_id] = u.display_name; });
+      return where('PersonalCollections', function (c) { return members[c.user_id] && c.share_status === 'APPROVED' && c.status === 'ACTIVE'; })
+        .map(function (c) { return { collection_id: c.collection_id, headword: c.headword, confirmed_meaning: c.confirmed_meaning,
+          example_sentence: c.example_sentence, subject: c.subject, note: c.share_note }; });
+    }
+
+    def('sync', { auth: 'student' }, function (ctx) { return studentSnapshot(ctx.user); });
+
+    /* ================================================================= 학생: 어휘 학습 기록 */
+    function svFor(user, vid) {
+      return where('StudentVocabulary', function (x) { return x.user_id === user.user_id && x.vocabulary_id === vid; })[0];
+    }
+
+    def('sv.save', { auth: 'student', write: true }, function (ctx, p) {
+      var vid = str(p.vocabulary_id, 60, '어휘');
+      if (!vocabExists(vid, ctx.user)) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+      var cur = svFor(ctx.user, vid), now = nowIso();
+      if (cur && p.base_rev !== undefined && Number(p.base_rev) !== cur.rev) fail('CONFLICT', '다른 기기에서 먼저 저장한 내용이 있습니다.', cur);
+      var patch = {};
+      if (p.textbook_sentence !== undefined) patch.textbook_sentence = str(p.textbook_sentence, C.TEXT_MAX, '교과서 문장', true);
+      if (p.guessed_meaning !== undefined) patch.guessed_meaning = str(p.guessed_meaning, C.TEXT_MAX, '짐작한 뜻', true);
+      if (p.self_explanation !== undefined) patch.self_explanation = str(p.self_explanation, C.TEXT_MAX, '자기 설명', true);
+      if (p.comprehension_level !== undefined) patch.comprehension_level = int(p.comprehension_level, 0, 4, '이해 정도');
+      var merged = Object.assign({}, cur || {}, patch);
+      var steps = computeSteps(merged, cur && cur.steps);
+      if (p.mark) { // 보기 단계 표시 (확인·뜻 확인·관련어 탐색)
+        var marks = Array.isArray(p.mark) ? p.mark : [p.mark];
+        marks.forEach(function (m) { oneOf(m, ['confirm', 'define', 'related'], '단계'); steps[m] = true; });
+      }
+      patch.steps = steps; patch.last_studied_at = now; patch.updated_at = now;
+      if (cur) {
+        patch.rev = cur.rev + 1;
+        store.update('StudentVocabulary', cur.sv_id, patch);
+        return get('StudentVocabulary', cur.sv_id);
+      }
+      var row = Object.assign({ sv_id: uid('SV'), user_id: ctx.user.user_id, vocabulary_id: vid, progress_status: 'IN_PROGRESS',
+        comprehension_level: 0, box: 0, next_review_at: '', rev: 1 }, patch);
+      store.insert('StudentVocabulary', row);
+      return get('StudentVocabulary', row.sv_id);
+    });
+
+    /* ================================================================= 학생: 세 장면 작문 */
+    function writingFor(user, vid, scene) {
+      return where('Writings', function (w) { return w.user_id === user.user_id && w.vocabulary_id === vid && w.scene_type === scene; })[0];
+    }
+
+    def('writing.save', { auth: 'student', write: true }, function (ctx, p) {
+      var vid = str(p.vocabulary_id, 60, '어휘');
+      if (!vocabExists(vid, ctx.user)) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+      var scene = oneOf(p.scene_type, SCENES, '장면');
+      var mode = oneOf(p.mode || 'DRAFT', ['DRAFT', 'SUBMIT'], '저장 방식');
+      var text = str(p.text, C.TEXT_MAX, '문장', mode === 'DRAFT');
+      if (mode === 'SUBMIT' && trim(text).length < 5) fail('TOO_SHORT', '문장을 조금 더 써서 제출해 주세요. (5자 이상)');
+      var cur = writingFor(ctx.user, vid, scene), now = nowIso();
+      if (cur && p.base_rev !== undefined && Number(p.base_rev) !== cur.rev) fail('CONFLICT', '다른 기기에서 먼저 저장한 내용이 있습니다.', cur);
+      if (!cur && p.base_rev) fail('CONFLICT', '기록이 바뀌었습니다. 다시 불러와 주세요.');
+      var check = p.self_check && typeof p.self_check === 'object' ? pick(p.self_check, ['word', 'scene', 'meaning', 'mine']) : undefined;
+      var row;
+      if (!cur) {
+        row = { writing_id: uid('W'), user_id: ctx.user.user_id, vocabulary_id: vid, scene_type: scene, draft_text: text, text: '',
+          status: 'DRAFT', version: 0, self_check: check || {}, example_viewed: 0, rev: 1, created_at: now, saved_at: now, submitted_at: '' };
+        if (mode === 'SUBMIT') { row.text = text; row.version = 1; row.status = 'SUBMITTED'; row.submitted_at = now; }
+        store.insert('Writings', row);
+        if (mode === 'SUBMIT') store.insert('WritingRevisions', { revision_id: uid('RV'), writing_id: row.writing_id, user_id: row.user_id, version: 1, text: text, saved_at: now });
+      } else {
+        var patch = { draft_text: text, saved_at: now, rev: cur.rev + 1 };
+        if (check) patch.self_check = check;
+        if (mode === 'SUBMIT') {
+          if (cur.version > 0 && cur.text === text) fail('UNCHANGED', '고친 곳이 없습니다. 문장을 고친 뒤에 다시 제출해 주세요.');
+          patch.text = text; patch.version = cur.version + 1; patch.status = 'SUBMITTED'; patch.submitted_at = now;
+          store.insert('WritingRevisions', { revision_id: uid('RV'), writing_id: cur.writing_id, user_id: cur.user_id, version: patch.version, text: text, saved_at: now });
+        } else {
+          patch.status = cur.version > 0 ? 'REVISING' : 'DRAFT';
+        }
+        store.update('Writings', cur.writing_id, patch);
+        row = get('Writings', cur.writing_id);
+      }
+      // 어휘 학습 기록의 마지막 학습 시각 갱신 (없으면 만들지 않는다)
+      var sv = svFor(ctx.user, vid);
+      if (sv) store.update('StudentVocabulary', sv.sv_id, { last_studied_at: now });
+      return get('Writings', row.writing_id);
+    });
+
+    def('writing.feature', { auth: 'student', write: true }, function (ctx, p) { // 대표 문장으로 고르기(포트폴리오)
+      var w = ownOr404(get('Writings', str(p.writing_id, 60, '글')), ctx.user);
+      if (w.version < 1) fail('BAD_REQUEST', '제출한 문장만 대표 문장으로 고를 수 있습니다.');
+      store.update('Writings', w.writing_id, { featured: p.featured ? 1 : 0 });
+      return get('Writings', w.writing_id);
+    });
+
+    def('writing.mark_example', { auth: 'student', write: true }, function (ctx, p) {
+      var w = ownOr404(get('Writings', str(p.writing_id, 60, '글')), ctx.user);
+      store.update('Writings', w.writing_id, { example_viewed: 1 });
+      return get('Writings', w.writing_id);
+    });
+
+    // 예시는 «먼저 작성한 뒤» 에만 보여 준다 (서버가 확인한다)
+    def('writing.example', { auth: 'student' }, function (ctx, p) {
+      var vid = str(p.vocabulary_id, 60, '어휘'), scene = oneOf(p.scene_type, SCENES, '장면');
+      var w = writingFor(ctx.user, vid, scene);
+      if (!w || (trim(w.draft_text).length < 5 && w.version === 0)) fail('WRITE_FIRST', '먼저 내 문장을 써 보세요. 쓴 다음에 예시를 볼 수 있어요.');
+      var pr = where('WritingPrompts', function (x) { return x.vocabulary_id === vid && x.scene_type === scene; })[0];
+      return { example: pr ? pr.example : '' };
+    });
+
+    def('writing.revisions', { auth: 'student' }, function (ctx, p) {
+      var w = ownOr404(get('Writings', str(p.writing_id, 60, '글')), ctx.user);
+      return where('WritingRevisions', function (r) { return r.writing_id === w.writing_id; }).sort(function (a, b) { return a.version - b.version; });
+    });
+
+    /* ================================================================= 학생: 나의 어휘 수집함 */
+    function findDictMatches(normHead) {
+      return where('Vocabulary', function (v) { return v.normalized_headword === normHead; })
+        .map(function (v) { return pick(v, ['vocabulary_id', 'headword', 'origin', 'definition']); });
+    }
+
+    function collectionFields(p) {
+      var f = {};
+      if (p.discovered_at !== undefined) { f.discovered_at = str(p.discovered_at, 10, '발견 날짜', true); if (f.discovered_at && !/^\d{4}-\d{2}-\d{2}$/.test(f.discovered_at)) fail('BAD_REQUEST', '날짜 형식이 올바르지 않습니다.'); }
+      if (p.medium !== undefined) f.medium = oneOf(str(p.medium, 20, '매체', true) || '기타', ['독서', '수업', '기사', '영상', '일상', '기타'], '매체');
+      ['source_context', 'guessed_meaning', 'confirmed_meaning', 'self_explanation', 'example_sentence', 'related_words'].forEach(function (k) {
+        if (p[k] !== undefined) f[k] = str(p[k], C.TEXT_MAX, k, true);
+      });
+      if (p.subject !== undefined) f.subject = str(p.subject, 20, '교과', true);
+      if (p.tags !== undefined) f.tags = str(p.tags, 100, '태그', true);
+      if (p.favorite !== undefined) f.favorite = p.favorite ? 1 : 0;
+      return f;
+    }
+
+    def('collection.add', { auth: 'student', write: true }, function (ctx, p) {
+      var head = trim(str(p.headword, 40, '낱말'));
+      var nh = norm(head), now = nowIso();
+      var mine = where('PersonalCollections', function (c) { return c.user_id === ctx.user.user_id && c.normalized_headword === nh && c.status !== 'PURGED'; });
+      var matches = findDictMatches(nh);
+      if ((mine.length || matches.length) && !p.confirm_duplicate) {
+        // 중복 안내: 저장하지 않고 알려 준다. 학생이 «새 문맥으로 따로 저장» 을 고르면 confirm_duplicate 로 다시 보낸다.
+        return { duplicate: true, mine: mine.map(function (c) { return pick(c, ['collection_id', 'headword', 'discovered_at', 'source_context', 'confirmed_meaning']); }), dictionary: matches };
+      }
+      var f = collectionFields(p);
+      var row = Object.assign({ collection_id: uid('C'), user_id: ctx.user.user_id, headword: head, normalized_headword: nh,
+        vocabulary_id: matches.length ? matches[0].vocabulary_id : '', duplicate_of: mine.length ? (mine[0].duplicate_of || mine[0].collection_id) : '',
+        discovered_at: now.substr(0, 10), medium: '기타', favorite: 0, status: 'ACTIVE', share_status: 'NONE', rev: 1,
+        created_at: now, updated_at: now }, f);
+      store.insert('PersonalCollections', row);
+      return { duplicate: false, item: get('PersonalCollections', row.collection_id) };
+    });
+
+    def('collection.save', { auth: 'student', write: true }, function (ctx, p) {
+      var c = ownOr404(get('PersonalCollections', str(p.collection_id, 60, '수집함')), ctx.user);
+      if (p.base_rev !== undefined && Number(p.base_rev) !== c.rev) fail('CONFLICT', '다른 기기에서 먼저 고친 내용이 있습니다.', c);
+      var f = collectionFields(p);
+      if (p.headword !== undefined) { f.headword = trim(str(p.headword, 40, '낱말')); f.normalized_headword = norm(f.headword); }
+      f.rev = c.rev + 1; f.updated_at = nowIso();
+      // 내용이 바뀌면 이미 승인된 공유는 다시 검토를 받아야 한다
+      if (c.share_status === 'APPROVED' && (f.confirmed_meaning !== undefined || f.example_sentence !== undefined)) f.share_status = 'NONE';
+      store.update('PersonalCollections', c.collection_id, f);
+      return get('PersonalCollections', c.collection_id);
+    });
+
+    def('collection.trash', { auth: 'student', write: true }, function (ctx, p) {
+      var c = ownOr404(get('PersonalCollections', str(p.collection_id, 60, '수집함')), ctx.user);
+      store.update('PersonalCollections', c.collection_id, { status: p.restore ? 'ACTIVE' : 'TRASHED', trashed_at: p.restore ? '' : nowIso(), share_status: p.restore ? c.share_status : 'NONE', rev: c.rev + 1, updated_at: nowIso() });
+      return get('PersonalCollections', c.collection_id);
+    });
+
+    def('collection.request_share', { auth: 'student', write: true }, function (ctx, p) {
+      var c = ownOr404(get('PersonalCollections', str(p.collection_id, 60, '수집함')), ctx.user);
+      if (c.status !== 'ACTIVE') fail('BAD_REQUEST', '지운 단어는 공유할 수 없습니다.');
+      if (!trim(c.confirmed_meaning)) fail('BAD_REQUEST', '확인한 뜻을 먼저 적어 주세요.');
+      store.update('PersonalCollections', c.collection_id, { share_status: 'PENDING', rev: c.rev + 1, updated_at: nowIso() });
+      return get('PersonalCollections', c.collection_id);
+    });
+
+    /* ================================================================= 학생: 오늘의 문장·복습 */
+    def('daily.save', { auth: 'student', write: true }, function (ctx, p) {
+      var date = str(p.date, 10, '날짜');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) fail('BAD_REQUEST', '날짜 형식이 올바르지 않습니다.');
+      var text = str(p.text, C.TEXT_MAX, '문장');
+      var vid = str(p.vocabulary_id, 60, '어휘', true);
+      if (vid && !vocabExists(vid, ctx.user)) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+      var now = nowIso();
+      if (p.daily_id) {
+        var d = ownOr404(get('DailySentences', str(p.daily_id, 60, '문장')), ctx.user);
+        if (p.base_rev !== undefined && Number(p.base_rev) !== d.rev) fail('CONFLICT', '다른 기기에서 먼저 고친 내용이 있습니다.', d);
+        store.update('DailySentences', d.daily_id, { text: text, vocabulary_id: vid, date: date, rev: d.rev + 1, updated_at: now });
+        return get('DailySentences', d.daily_id);
+      }
+      var row = { daily_id: uid('D'), user_id: ctx.user.user_id, date: date, text: text, vocabulary_id: vid, rev: 1, created_at: now, updated_at: now, deleted: 0 };
+      store.insert('DailySentences', row);
+      return row;
+    });
+
+    def('daily.delete', { auth: 'student', write: true }, function (ctx, p) {
+      var d = ownOr404(get('DailySentences', str(p.daily_id, 60, '문장')), ctx.user);
+      store.update('DailySentences', d.daily_id, { deleted: 1, updated_at: nowIso() });
+      return { deleted: true };
+    });
+
+    def('review.record', { auth: 'student', write: true }, function (ctx, p) {
+      var vid = str(p.vocabulary_id, 60, '어휘');
+      if (!vocabExists(vid, ctx.user)) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+      var mode = oneOf(p.mode, ['recall', 'context', 'synonym', 'fix', 'improve', 'transfer'], '복습 방식');
+      var result = oneOf(p.result, ['CORRECT', 'WRONG'], '결과');
+      var now = nowIso();
+      store.insert('ReviewRecords', { review_id: uid('RR'), user_id: ctx.user.user_id, vocabulary_id: vid, mode: mode, result: result,
+        detail: str(p.detail, 500, '내용', true), created_at: now });
+      var sv = svFor(ctx.user, vid);
+      var box = sv ? sv.box : 0;
+      box = result === 'CORRECT' ? Math.min(5, box + 1) : 1;
+      var tr = mode === 'transfer' && result === 'CORRECT';
+      if (sv) {
+        var patch = { box: box, next_review_at: nextReview(box, now), last_studied_at: now };
+        if (tr) patch.steps = Object.assign({}, sv.steps || {}, { transfer: true });
+        store.update('StudentVocabulary', sv.sv_id, patch);
+      } else {
+        store.insert('StudentVocabulary', { sv_id: uid('SV'), user_id: ctx.user.user_id, vocabulary_id: vid, progress_status: 'IN_PROGRESS', steps: tr ? { transfer: true } : {},
+          comprehension_level: 0, box: box, next_review_at: nextReview(box, now), last_studied_at: now, rev: 1, updated_at: now });
+      }
+      return { box: box, next_review_at: nextReview(box, now) };
+    });
+
+    def('feedback.read', { auth: 'student', write: true }, function (ctx, p) {
+      var f = get('TeacherFeedback', str(p.feedback_id, 60, '피드백'));
+      if (!f || f.student_id !== ctx.user.user_id) fail('NOT_FOUND', '피드백을 찾을 수 없습니다.');
+      if (!f.read_at) store.update('TeacherFeedback', f.feedback_id, { read_at: nowIso() });
+      return { read: true };
+    });
+
+    /* ================================================================= 교사: 학급·학생 */
+    function newLoginId(cls, no) {
+      var base = String(cls.grade) + (cls.class_name.replace(/\D/g, '').length ? ('0' + cls.class_name.replace(/\D/g, '')).slice(-2) : 'xx') + ('0' + no).slice(-2);
+      var id = base, n = 0;
+      while (where('Users', function (u) { return u.login_id.toLowerCase() === id.toLowerCase(); }).length) { n++; id = base + String.fromCharCode(96 + Math.min(n, 26)) + (n > 26 ? n : ''); }
+      return id;
+    }
+
+    function createStudent(teacher, cls, name, no) {
+      var now = nowIso(), code = newInviteCode(), salt = env.randomHex(16);
+      var u = { user_id: uid('U'), role: 'student', login_id: newLoginId(cls, no), display_name: name, class_id: cls.class_id, student_no: no,
+        credential_hash: '', salt: salt, invite_hash: hashSecret(normInvite(code), salt), invite_expires: hoursFrom(now, C.INVITE_DAYS * 24),
+        status: 'ACTIVE', failed_count: 0, locked_until: '', created_at: now, last_login_at: '' };
+      store.insert('Users', u);
+      audit(teacher.user_id, 'student_create', u.user_id, '');
+      return { user_id: u.user_id, login_id: u.login_id, display_name: name, student_no: no, invite_code: code, invite_expires: u.invite_expires };
+    }
+
+    def('class.list', { auth: 'teacher' }, function (ctx) {
+      return where('Classes', function (c) { return c.teacher_id === ctx.user.user_id; });
+    });
+
+    def('class.create', { auth: 'teacher', write: true }, function (ctx, p) {
+      var row = { class_id: uid('CL'), school_year: int(p.school_year, 2020, 2100, '학년도'), grade: int(p.grade, 1, 6, '학년'),
+        class_name: str(p.class_name, 20, '반 이름'), teacher_id: ctx.user.user_id, created_at: nowIso() };
+      store.insert('Classes', row);
+      for (var i = 1; i <= C.LESSONS; i++) {
+        store.insert('Lessons', { lesson_id: uid('LS'), class_id: row.class_id, lesson_number: i, title: i + '차시', goals: '', published: 0, due_date: '' });
+      }
+      audit(ctx.user.user_id, 'class_create', row.class_id, '');
+      return row;
+    });
+
+    def('student.create', { auth: 'teacher', write: true }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var list = Array.isArray(p.students) ? p.students : [{ name: p.display_name, no: p.student_no }];
+      if (list.length > 60) fail('BAD_REQUEST', '한 번에 60명까지 만들 수 있습니다.');
+      var used = {};
+      where('Users', function (u) { return u.class_id === cls.class_id && u.role === 'student'; }).forEach(function (u) { used[u.student_no] = true; });
+      return list.map(function (s) {
+        var no = int(s.no, 1, 99, '번호'), name = trim(str(s.name, 20, '이름'));
+        if (used[no]) fail('DUPLICATE', no + '번 학생은 이미 있습니다.');
+        used[no] = true;
+        return createStudent(ctx.user, cls, name, no);
+      });
+    });
+
+    def('student.reset', { auth: 'teacher', write: true }, function (ctx, p) { // 계정 복구: 새 초대 코드를 주고 기존 로그인을 끊는다
+      var s = requireTeacherOfStudent(ctx.user, p.user_id);
+      var now = nowIso(), code = newInviteCode(), salt = env.randomHex(16);
+      store.update('Users', s.user_id, { salt: salt, credential_hash: '', invite_hash: hashSecret(normInvite(code), salt),
+        invite_expires: hoursFrom(now, C.INVITE_DAYS * 24), failed_count: 0, locked_until: '' });
+      where('Sessions', function (x) { return x.user_id === s.user_id; }).forEach(function (x) { store.remove('Sessions', x.token_hash); });
+      audit(ctx.user.user_id, 'student_reset', s.user_id, '');
+      return { login_id: s.login_id, display_name: s.display_name, invite_code: code, invite_expires: hoursFrom(now, C.INVITE_DAYS * 24) };
+    });
+
+    def('student.set_status', { auth: 'teacher', write: true }, function (ctx, p) {
+      var s = requireTeacherOfStudent(ctx.user, p.user_id);
+      var st = oneOf(p.status, ['ACTIVE', 'DISABLED'], '상태');
+      store.update('Users', s.user_id, { status: st });
+      if (st === 'DISABLED') where('Sessions', function (x) { return x.user_id === s.user_id; }).forEach(function (x) { store.remove('Sessions', x.token_hash); });
+      audit(ctx.user.user_id, 'student_status_' + st, s.user_id, '');
+      return { status: st };
+    });
+
+    // 개인정보 삭제 정책: 학생 계정과 그 학생의 모든 기록을 지운다 (되돌릴 수 없음)
+    def('student.purge', { auth: 'teacher', write: true }, function (ctx, p) {
+      var s = requireTeacherOfStudent(ctx.user, p.user_id);
+      if (p.confirm !== s.login_id) fail('CONFIRM_REQUIRED', '확인을 위해 학생 아이디를 정확히 입력해야 합니다.');
+      var removed = 0;
+      ['StudentVocabulary', 'PersonalCollections', 'Writings', 'WritingRevisions', 'DailySentences', 'ReviewRecords', 'Sessions'].forEach(function (t) {
+        where(t, function (r) { return r.user_id === s.user_id; }).forEach(function (r) { store.remove(t, r[keyOf(t)]); removed++; });
+      });
+      where('TeacherFeedback', function (r) { return r.student_id === s.user_id; }).forEach(function (r) { store.remove('TeacherFeedback', r.feedback_id); removed++; });
+      store.remove('Users', s.user_id);
+      audit(ctx.user.user_id, 'student_purge', s.user_id, 'rows=' + removed);
+      return { removed: removed + 1 };
+    });
+
+    function studentSummary(u, ix) {
+      var sv = ix.sv[u.user_id] || [], ws = ix.writings[u.user_id] || [], cs = ix.collections[u.user_id] || [];
+      var wByV = {}; ws.forEach(function (w) { (wByV[w.vocabulary_id] = wByV[w.vocabulary_id] || []).push(w); });
+      var svBy = {}; sv.forEach(function (x) { svBy[x.vocabulary_id] = x; });
+      var schoolDone = 0, natStarted = 0, natDone = 0, active = 0;
+      Object.keys(ix.origin).forEach(function (vid) {
+        var o = ix.origin[vid];
+        var x = svBy[vid], w = wByV[vid];
+        if (o === 'NATIONAL') { if (x || w) natStarted++; }
+        if (!x && !w) return;
+        var st = vocabStatus(o, x, w);
+        if (st.done) { if (o === 'SCHOOL') schoolDone++; else natDone++; }
+        if (st.level.active) active++;
+      });
+      var last = ''; sv.concat(ws).forEach(function (r) { var t = r.last_studied_at || r.saved_at || ''; if (t > last) last = t; });
+      return { user_id: u.user_id, login_id: u.login_id, display_name: u.display_name, student_no: u.student_no, status: u.status,
+        activated: !!u.credential_hash, school_done: schoolDone, national_started: natStarted, national_done: natDone, active_words: active,
+        collections: cs.filter(function (c) { return c.status === 'ACTIVE'; }).length,
+        writings_submitted: ws.filter(function (w) { return w.version > 0; }).length,
+        pending_share: cs.filter(function (c) { return c.share_status === 'PENDING'; }).length, last_active: last, last_login_at: u.last_login_at };
+    }
+
+    function buildIndex(studentIds) {
+      var set = {}; studentIds.forEach(function (i) { set[i] = true; });
+      function group(t, key) { var g = {}; all(t).forEach(function (r) { if (set[r.user_id]) (g[r.user_id] = g[r.user_id] || []).push(r); }); return g; }
+      var origin = {}; all('Vocabulary').forEach(function (v) { origin[v.vocabulary_id] = v.origin; });
+      return { sv: group('StudentVocabulary'), writings: group('Writings'), collections: group('PersonalCollections'), origin: origin };
+    }
+
+    def('student.list', { auth: 'teacher' }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var us = where('Users', function (u) { return u.class_id === cls.class_id && u.role === 'student'; }).sort(function (a, b) { return a.student_no - b.student_no; });
+      var ix = buildIndex(us.map(function (u) { return u.user_id; }));
+      return us.map(function (u) { return studentSummary(u, ix); });
+    });
+
+    def('student.detail', { auth: 'teacher' }, function (ctx, p) {
+      var s = requireTeacherOfStudent(ctx.user, p.user_id);
+      audit(ctx.user.user_id, 'view_student', s.user_id, '');
+      var writings = where('Writings', function (w) { return w.user_id === s.user_id; });
+      var wIds = {}; writings.forEach(function (w) { wIds[w.writing_id] = true; });
+      var daily = where('DailySentences', function (d) { return d.user_id === s.user_id && !d.deleted; });
+      var dIds = {}; daily.forEach(function (d) { dIds[d.daily_id] = true; });
+      return {
+        user: publicUser(s),
+        sv: where('StudentVocabulary', function (x) { return x.user_id === s.user_id; }),
+        collections: where('PersonalCollections', function (x) { return x.user_id === s.user_id; }),
+        writings: writings,
+        revisions: where('WritingRevisions', function (r) { return wIds[r.writing_id]; }),
+        daily: daily,
+        reviews: where('ReviewRecords', function (x) { return x.user_id === s.user_id; }),
+        feedback: where('TeacherFeedback', function (f) { return f.student_id === s.user_id; })
+      };
+    });
+
+    /* ================================================================= 교사: 차시·과제·내용 */
+    def('lesson.list', { auth: 'teacher' }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      return lessonsForClass(cls.class_id, false);
+    });
+
+    def('lesson.save', { auth: 'teacher', write: true }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var n = int(p.lesson_number, 1, C.LESSONS, '차시');
+      var l = where('Lessons', function (x) { return x.class_id === cls.class_id && x.lesson_number === n; })[0];
+      var patch = {};
+      if (p.title !== undefined) patch.title = str(p.title, 80, '제목');
+      if (p.goals !== undefined) patch.goals = str(p.goals, 500, '학습 목표', true);
+      if (p.published !== undefined) patch.published = p.published ? 1 : 0;
+      if (p.due_date !== undefined) patch.due_date = str(p.due_date, 10, '기한', true);
+      if (!l) { l = Object.assign({ lesson_id: uid('LS'), class_id: cls.class_id, lesson_number: n, title: n + '차시', goals: '', published: 0, due_date: '' }, patch); store.insert('Lessons', l); }
+      else store.update('Lessons', l.lesson_id, patch);
+      return lessonsForClass(cls.class_id, false).filter(function (x) { return x.lesson_number === n; })[0];
+    });
+
+    def('lesson.set_vocab', { auth: 'teacher', write: true }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var n = int(p.lesson_number, 1, C.LESSONS, '차시');
+      if (!Array.isArray(p.items) || p.items.length > 60) fail('BAD_REQUEST', '어휘 목록이 올바르지 않습니다.');
+      var seen = {};
+      p.items.forEach(function (it) {
+        str(it.vocabulary_id, 60, '어휘');
+        if (!get('Vocabulary', it.vocabulary_id)) fail('NOT_FOUND', '없는 어휘가 있습니다.');
+        if (seen[it.vocabulary_id]) fail('DUPLICATE', '같은 어휘가 두 번 들어 있습니다.');
+        seen[it.vocabulary_id] = true;
+      });
+      where('LessonVocabulary', function (x) { return x.class_id === cls.class_id && x.lesson_number === n; }).forEach(function (x) { store.remove('LessonVocabulary', x.lv_id); });
+      p.items.forEach(function (it, i) {
+        store.insert('LessonVocabulary', { lv_id: uid('LV'), class_id: cls.class_id, lesson_number: n, vocabulary_id: it.vocabulary_id, required: it.required === false ? 0 : 1, sort: i });
+      });
+      return lessonsForClass(cls.class_id, false).filter(function (x) { return x.lesson_number === n; })[0];
+    });
+
+    // 학교 필수 어휘를 교과별로 묶어 34개 차시에 고르게 나눈다 (제안일 뿐, 교사가 고칠 수 있다)
+    def('lesson.auto_distribute', { auth: 'teacher', write: true }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var school = where('Vocabulary', function (v) { return v.origin === 'SCHOOL'; });
+      var order = ['국어', '역사', '도덕', '과학', '수학', '기가'];
+      school.sort(function (a, b) { var d = order.indexOf(a.subject) - order.indexOf(b.subject); return d || (a.headword < b.headword ? -1 : 1); });
+      where('LessonVocabulary', function (x) { return x.class_id === cls.class_id; }).forEach(function (x) { store.remove('LessonVocabulary', x.lv_id); });
+      school.forEach(function (v, i) { // 34개 차시에 고르게(한 차시 3~4개) 나눈다
+        var n = Math.min(C.LESSONS, Math.floor(i * C.LESSONS / school.length) + 1);
+        store.insert('LessonVocabulary', { lv_id: uid('LV'), class_id: cls.class_id, lesson_number: n, vocabulary_id: v.vocabulary_id, required: 1, sort: i });
+      });
+      audit(ctx.user.user_id, 'lesson_auto_distribute', cls.class_id, '');
+      return lessonsForClass(cls.class_id, false);
+    });
+
+    def('vocab.save', { auth: 'teacher', write: true }, function (ctx, p) { // 뜻풀이 검토·수정, 새 어휘 추가
+      var now = nowIso();
+      if (p.vocabulary_id) {
+        var v = get('Vocabulary', str(p.vocabulary_id, 60, '어휘'));
+        if (!v) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+        var patch = { edited_at: now, edited_by: ctx.user.user_id };
+        if (p.definition !== undefined) patch.definition = str(p.definition, 500, '뜻풀이');
+        patch.definition_status = oneOf(p.definition_status || 'TEACHER_REVIEWED', ['DRAFT_REVIEW', 'TEACHER_REVIEWED', 'NATIONAL_CARD', 'CUSTOM'], '검토 상태');
+        store.update('Vocabulary', v.vocabulary_id, patch);
+        audit(ctx.user.user_id, 'vocab_edit', v.vocabulary_id, '');
+        return get('Vocabulary', v.vocabulary_id);
+      }
+      var head = trim(str(p.headword, 40, '낱말'));
+      var row = { vocabulary_id: uid('V-C'), headword: head, normalized_headword: norm(head), sense_id: 'C1', definition: str(p.definition, 500, '뜻풀이'),
+        definition_status: 'CUSTOM', semantic_category: '', origin: 'CUSTOM', subject: str(p.subject, 20, '교과', true), edited_at: now, edited_by: ctx.user.user_id };
+      store.insert('Vocabulary', row);
+      store.insert('VocabularySources', { source_id: uid('SRC'), vocabulary_id: row.vocabulary_id, source_type: 'PERSONAL', original_entry_id: 'teacher:' + ctx.user.user_id,
+        subject: row.subject, publisher: '', page: '', permission_status: 'SCHOOL_OWN' });
+      return row;
+    });
+
+    def('prompt.save', { auth: 'teacher', write: true }, function (ctx, p) { // 작문 상황·사고 질문·예시 수정/추가
+      var vid = str(p.vocabulary_id, 60, '어휘');
+      if (!get('Vocabulary', vid)) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+      var scene = oneOf(p.scene_type, SCENES, '장면');
+      var cur = where('WritingPrompts', function (x) { return x.vocabulary_id === vid && x.scene_type === scene; })[0];
+      var patch = { scenario: str(p.scenario, 500, '상황'), guiding_question: str(p.guiding_question, 300, '사고 질문'), example: str(p.example, 500, '예시', true),
+        content_status: 'TEACHER_REVIEWED', edited_at: nowIso(), edited_by: ctx.user.user_id };
+      if (cur) store.update('WritingPrompts', cur.prompt_id, patch);
+      else store.insert('WritingPrompts', Object.assign({ prompt_id: uid('P'), vocabulary_id: vid, scene_type: scene, origin: 'CUSTOM' }, patch));
+      return where('WritingPrompts', function (x) { return x.vocabulary_id === vid && x.scene_type === scene; })[0];
+    });
+
+    def('prompt.get', { auth: 'teacher' }, function (ctx, p) { // 교사는 예시 문장까지 볼 수 있다
+      var vid = str(p.vocabulary_id, 60, '어휘');
+      return where('WritingPrompts', function (x) { return x.vocabulary_id === vid; });
+    });
+
+    def('activity.save', { auth: 'teacher', write: true }, function (ctx, p) { // 복습 문항 추가
+      var vid = str(p.vocabulary_id, 60, '어휘');
+      if (!get('Vocabulary', vid)) fail('NOT_FOUND', '어휘를 찾을 수 없습니다.');
+      var row = { activity_id: uid('A'), vocabulary_id: vid, type: oneOf(p.type, ['context', 'synonym', 'fix', 'transfer'], '유형'),
+        prompt: str(p.prompt, 500, '문항'), answer_key: str(p.answer_key, 300, '정답', true), content_status: 'TEACHER_REVIEWED', created_by: ctx.user.user_id, created_at: nowIso() };
+      store.insert('LearningActivities', row);
+      return row;
+    });
+
+    /* ================================================================= 교사: 피드백·수집 어휘 검토 */
+    def('feedback.save', { auth: 'teacher', write: true }, function (ctx, p) {
+      var tid = str(p.target_id, 60, '대상'), type = oneOf(p.target_type || 'WRITING', ['WRITING', 'DAILY'], '대상 종류');
+      var target = type === 'WRITING' ? get('Writings', tid) : get('DailySentences', tid);
+      if (!target) fail('NOT_FOUND', '대상을 찾을 수 없습니다.');
+      requireTeacherOfStudent(ctx.user, target.user_id);
+      var rubric = {};
+      if (p.rubric) RUBRIC.forEach(function (k) { if (p.rubric[k] !== undefined && p.rubric[k] !== null && p.rubric[k] !== '') rubric[k] = int(p.rubric[k], 1, 4, RUBRIC_LABEL[k]); });
+      var comment = str(p.comment, 1000, '피드백', true);
+      if (!comment && !Object.keys(rubric).length) fail('BAD_REQUEST', '피드백 글이나 점수를 하나 이상 넣어 주세요.');
+      var now = nowIso();
+      var cur = where('TeacherFeedback', function (f) { return f.target_id === tid && f.teacher_id === ctx.user.user_id; })[0];
+      if (cur) { store.update('TeacherFeedback', cur.feedback_id, { comment: comment, rubric: rubric, updated_at: now, read_at: '' }); return get('TeacherFeedback', cur.feedback_id); }
+      var row = { feedback_id: uid('F'), target_id: tid, target_type: type, student_id: target.user_id, teacher_id: ctx.user.user_id, comment: comment, rubric: rubric, created_at: now, updated_at: now, read_at: '' };
+      store.insert('TeacherFeedback', row);
+      return row;
+    });
+
+    def('collection.review', { auth: 'teacher', write: true }, function (ctx, p) {
+      var c = get('PersonalCollections', str(p.collection_id, 60, '수집함'));
+      if (!c) fail('NOT_FOUND', '단어를 찾을 수 없습니다.');
+      requireTeacherOfStudent(ctx.user, c.user_id);
+      var d = oneOf(p.decision, ['APPROVED', 'REJECTED'], '결정');
+      store.update('PersonalCollections', c.collection_id, { share_status: d, share_note: str(p.note, 300, '메모', true), rev: c.rev + 1, updated_at: nowIso() });
+      audit(ctx.user.user_id, 'collection_' + d, c.collection_id, '');
+      return get('PersonalCollections', c.collection_id);
+    });
+
+    def('review.pending', { auth: 'teacher' }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var members = {}; where('Users', function (u) { return u.class_id === cls.class_id && u.role === 'student'; }).forEach(function (u) { members[u.user_id] = u.display_name; });
+      return where('PersonalCollections', function (c) { return members[c.user_id] && c.share_status === 'PENDING'; })
+        .map(function (c) { return Object.assign(pick(c, ['collection_id', 'headword', 'confirmed_meaning', 'example_sentence', 'source_context', 'subject']), { student: members[c.user_id], user_id: c.user_id }); });
+    });
+
+    /* ================================================================= 교사: 통계·내보내기·백업 */
+    def('stats.class', { auth: 'teacher' }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var us = where('Users', function (u) { return u.class_id === cls.class_id && u.role === 'student'; });
+      var ids = us.map(function (u) { return u.user_id; });
+      var ix = buildIndex(ids);
+      var sums = us.map(function (u) { return studentSummary(u, ix); });
+      var bySubject = {};
+      var vmap = {}; all('Vocabulary').forEach(function (v) { vmap[v.vocabulary_id] = v; });
+      var wordCount = {};
+      ids.forEach(function (id) {
+        (ix.writings[id] || []).forEach(function (w) { if (w.version > 0) wordCount[w.vocabulary_id] = (wordCount[w.vocabulary_id] || 0) + 1; });
+        (ix.sv[id] || []).forEach(function (x) { var v = vmap[x.vocabulary_id]; if (v && v.origin === 'SCHOOL') {
+          var st = vocabStatus('SCHOOL', x, (ix.writings[id] || []).filter(function (w) { return w.vocabulary_id === x.vocabulary_id; }));
+          var s = bySubject[v.subject] = bySubject[v.subject] || { started: 0, done: 0 };
+          s.started++; if (st.done) s.done++;
+        } });
+      });
+      var feedbackTotal = where('TeacherFeedback', function (f) { return f.teacher_id === ctx.user.user_id; }).length;
+      return { students: sums, by_subject: bySubject, feedback_total: feedbackTotal,
+        incomplete_required: requiredIncomplete(cls.class_id, ids, ix) };
+    });
+
+    function requiredIncomplete(classId, ids, ix) {
+      var req = {}; where('LessonVocabulary', function (x) { return x.class_id === classId && x.required; }).forEach(function (x) { req[x.vocabulary_id] = true; });
+      var out = {};
+      ids.forEach(function (id) {
+        var svBy = {}; (ix.sv[id] || []).forEach(function (x) { svBy[x.vocabulary_id] = x; });
+        var wBy = {}; (ix.writings[id] || []).forEach(function (w) { (wBy[w.vocabulary_id] = wBy[w.vocabulary_id] || []).push(w); });
+        var left = 0;
+        Object.keys(req).forEach(function (vid) { if (!vocabStatus(ix.origin[vid] || 'SCHOOL', svBy[vid], wBy[vid]).done) left++; });
+        out[id] = left;
+      });
+      return out;
+    }
+
+    // 내보내기: 서버는 행(배열)을 돌려주고, 화면이 CSV/XLSX 파일로 만든다. 접근 기록을 남긴다.
+    def('export.class', { auth: 'teacher' }, function (ctx, p) {
+      var cls = requireTeacherOfClass(ctx.user, p.class_id);
+      var kind = oneOf(p.kind, ['progress', 'writings', 'collections'], '내보내기 종류');
+      var us = where('Users', function (u) { return u.class_id === cls.class_id && u.role === 'student'; }).sort(function (a, b) { return a.student_no - b.student_no; });
+      var uMap = {}; us.forEach(function (u) { uMap[u.user_id] = u; });
+      var vmap = {}; all('Vocabulary').forEach(function (v) { vmap[v.vocabulary_id] = v; });
+      audit(ctx.user.user_id, 'export_' + kind, cls.class_id, '');
+      var rows;
+      if (kind === 'progress') {
+        var ix = buildIndex(us.map(function (u) { return u.user_id; }));
+        rows = [['번호', '이름', '아이디', '학교 어휘 완료', '국가 어휘 시작', '국가 어휘 완료', '능동 어휘', '수집 어휘', '제출한 문장', '마지막 학습']]
+          .concat(us.map(function (u) { var s = studentSummary(u, ix); return [s.student_no, s.display_name, s.login_id, s.school_done, s.national_started, s.national_done, s.active_words, s.collections, s.writings_submitted, s.last_active]; }));
+      } else if (kind === 'writings') {
+        rows = [['번호', '이름', '어휘', '장면', '제출한 문장', '제출 횟수', '제출 시각']];
+        where('Writings', function (w) { return uMap[w.user_id] && w.version > 0; }).sort(function (a, b) { return uMap[a.user_id].student_no - uMap[b.user_id].student_no; })
+          .forEach(function (w) { var v = vmap[w.vocabulary_id]; rows.push([uMap[w.user_id].student_no, uMap[w.user_id].display_name, v ? v.headword : '(내 단어)', SCENE_LABEL[w.scene_type], w.text, w.version, w.submitted_at]); });
+      } else {
+        rows = [['번호', '이름', '낱말', '발견한 날', '매체', '확인한 뜻', '예문', '공유 상태']];
+        where('PersonalCollections', function (c) { return uMap[c.user_id] && c.status === 'ACTIVE'; })
+          .forEach(function (c) { rows.push([uMap[c.user_id].student_no, uMap[c.user_id].display_name, c.headword, c.discovered_at, c.medium, c.confirmed_meaning, c.example_sentence, c.share_status]); });
+      }
+      return { filename: cls.school_year + '_' + cls.grade + '학년' + cls.class_name + '_' + kind, rows: rows.map(function (r, i) { return i === 0 ? r : r.map(csvSafe); }) };
+    });
+
+    var BACKUP_TABLES = ['Classes', 'Users', 'Lessons', 'LessonVocabulary', 'StudentVocabulary', 'PersonalCollections', 'Writings', 'WritingRevisions',
+      'DailySentences', 'ReviewRecords', 'TeacherFeedback'];
+
+    def('backup.export', { auth: 'teacher' }, function (ctx) {
+      var classes = where('Classes', function (c) { return c.teacher_id === ctx.user.user_id; });
+      var cset = {}; classes.forEach(function (c) { cset[c.class_id] = true; });
+      var users = where('Users', function (u) { return cset[u.class_id] && u.role === 'student'; });
+      var uset = {}; users.forEach(function (u) { uset[u.user_id] = true; });
+      var wset = {}; where('Writings', function (w) { return uset[w.user_id]; }).forEach(function (w) { wset[w.writing_id] = true; });
+      var data = {
+        Classes: classes,
+        Users: users.map(function (u) { return Object.assign({}, u); }), // 비밀번호 해시도 포함: 복원 후에도 같은 비밀번호로 로그인되게
+        Lessons: where('Lessons', function (r) { return cset[r.class_id]; }),
+        LessonVocabulary: where('LessonVocabulary', function (r) { return cset[r.class_id]; }),
+        StudentVocabulary: where('StudentVocabulary', function (r) { return uset[r.user_id]; }),
+        PersonalCollections: where('PersonalCollections', function (r) { return uset[r.user_id]; }),
+        Writings: where('Writings', function (r) { return uset[r.user_id]; }),
+        WritingRevisions: where('WritingRevisions', function (r) { return wset[r.writing_id]; }),
+        DailySentences: where('DailySentences', function (r) { return uset[r.user_id]; }),
+        ReviewRecords: where('ReviewRecords', function (r) { return uset[r.user_id]; }),
+        TeacherFeedback: where('TeacherFeedback', function (r) { return uset[r.student_id]; })
+      };
+      audit(ctx.user.user_id, 'backup_export', '', '');
+      return { format: 'vocab-backup-1', created_at: nowIso(), teacher_id: ctx.user.user_id, data: data };
+    });
+
+    // 복원: 내 학급에 속한 행만 «있으면 덮어쓰고 없으면 추가». 지우지는 않는다.
+    def('backup.restore', { auth: 'teacher', write: true }, function (ctx, p) {
+      var b = p.backup;
+      if (!b || b.format !== 'vocab-backup-1' || b.teacher_id !== ctx.user.user_id || !b.data) fail('BAD_REQUEST', '이 선생님의 백업 파일이 아닙니다.');
+      var mine = {}; where('Classes', function (c) { return c.teacher_id === ctx.user.user_id; }).forEach(function (c) { mine[c.class_id] = true; });
+      (b.data.Classes || []).forEach(function (c) { if (c.teacher_id === ctx.user.user_id) mine[c.class_id] = true; });
+      var userIn = {}; (b.data.Users || []).forEach(function (u) { if (mine[u.class_id]) userIn[u.user_id] = true; });
+      var n = 0;
+      BACKUP_TABLES.forEach(function (t) {
+        (b.data[t] || []).forEach(function (r) {
+          var ok = (t === 'Classes') ? r.teacher_id === ctx.user.user_id
+            : (t === 'Users') ? (mine[r.class_id] && r.role === 'student')
+            : (t === 'Lessons' || t === 'LessonVocabulary') ? mine[r.class_id]
+            : (t === 'TeacherFeedback') ? (userIn[r.student_id] && r.teacher_id === ctx.user.user_id)
+            : (t === 'WritingRevisions') ? userIn[r.user_id]
+            : userIn[r.user_id];
+          if (!ok) return;
+          var key = r[keyOf(t)];
+          if (get(t, key)) store.update(t, key, r); else store.insert(t, r);
+          n++;
+        });
+      });
+      audit(ctx.user.user_id, 'backup_restore', '', 'rows=' + n);
+      return { restored: n };
+    });
+
+    def('audit.list', { auth: 'teacher' }, function (ctx) {
+      var mineIds = {}; mineIds[ctx.user.user_id] = true;
+      where('Users', function (u) { return u.role === 'student'; }).forEach(function (u) { var c = get('Classes', u.class_id); if (c && c.teacher_id === ctx.user.user_id) mineIds[u.user_id] = true; });
+      return where('AuditLogs', function (l) { return mineIds[l.actor_id] || mineIds[l.target_id]; }).slice(-200).reverse();
+    });
+
+    /* ================================================================= 요청 처리기 */
+    function cleanReqLog(now) {
+      var cut = minutesFrom(now, -C.REQLOG_MINUTES);
+      where('ReqLog', function (r) { return r.created_at < cut; }).forEach(function (r) { store.remove('ReqLog', r.req_id); });
+    }
+
+    function run(req) {
+      var d = H[req.action];
+      var ctx = {};
+      if (d.auth !== 'none') {
+        var a = authenticate(req.token);
+        ctx.user = a.user; ctx.session = a.session;
+        if (d.auth === 'teacher' && a.user.role !== 'teacher') fail('FORBIDDEN', '선생님만 쓸 수 있는 기능입니다.');
+        if (d.auth === 'student' && a.user.role !== 'student') fail('FORBIDDEN', '학생 화면에서만 쓸 수 있습니다.');
+      }
+      var payload = req.payload && typeof req.payload === 'object' ? req.payload : {};
+      if (!d.write) return d.fn(ctx, payload);
+      return env.lock(function () {
+        var now = nowIso(), rid = isStr(req.req_id) && req.req_id.length <= 64 ? req.req_id : '';
+        if (rid && ctx.user) { // 같은 요청이 두 번 들어오면(재전송·더블클릭) 처음 결과를 그대로 돌려준다
+          var prior = get('ReqLog', rid);
+          if (prior && prior.user_id === ctx.user.user_id) return JSON.parse(prior.response);
+        }
+        // 잠금 안에서 세션을 다시 확인한다 (로그아웃·비밀번호 변경과 겹치는 경우)
+        if (ctx.user) { var again = get('Sessions', ctx.session.token_hash); if (!again && d.fn !== H['auth.logout'].fn) fail('UNAUTHENTICATED', '로그인이 필요합니다.'); }
+        var out = d.fn(ctx, payload);
+        if (rid && ctx.user && action_isSave(req.action)) {
+          cleanReqLog(now);
+          store.insert('ReqLog', { req_id: rid, user_id: ctx.user.user_id, response: JSON.stringify(out), created_at: now });
+        }
+        return out;
+      });
+    }
+    // 처음 결과를 다시 돌려줄 수 있는 «저장» 요청만 기록한다. 초대 코드·로그인 토큰이 든 응답은 시트에 남기지 않는다.
+    var REPLAYABLE = { 'sv.save': 1, 'writing.save': 1, 'collection.add': 1, 'collection.save': 1, 'collection.trash': 1,
+      'daily.save': 1, 'review.record': 1, 'feedback.save': 1 };
+    function action_isSave(a) { return !!REPLAYABLE[a]; }
+
+    function handle(req) {
+      try {
+        if (!req || typeof req !== 'object' || !isStr(req.action) || !H[req.action]) fail('NOT_FOUND', '알 수 없는 요청입니다.');
+        return { ok: true, data: run(req) };
+      } catch (e) {
+        if (e && e.code) return { ok: false, error: { code: e.code, message: e.message, data: e.data === undefined ? undefined : e.data } };
+        if (env.log) env.log(e);
+        return { ok: false, error: { code: 'INTERNAL', message: '서버에서 문제가 생겼습니다. 잠시 뒤에 다시 해 보세요.' } };
+      }
+    }
+
+    /* ---------- 관리용(웹으로 열리지 않음): 교사 계정 만들기, 어휘 데이터 넣기 ---------- */
+    function createTeacher(loginId, displayName) {
+      return env.lock(function () {
+        loginId = str(loginId, 40, '아이디'); displayName = str(displayName, 20, '이름');
+        if (where('Users', function (u) { return u.login_id.toLowerCase() === loginId.toLowerCase(); }).length) fail('DUPLICATE', '이미 있는 아이디입니다.');
+        var now = nowIso(), code = newInviteCode(), salt = env.randomHex(16);
+        store.insert('Users', { user_id: uid('U'), role: 'teacher', login_id: loginId, display_name: displayName, class_id: '', student_no: 0,
+          credential_hash: '', salt: salt, invite_hash: hashSecret(normInvite(code), salt), invite_expires: hoursFrom(now, C.INVITE_DAYS * 24),
+          status: 'ACTIVE', failed_count: 0, locked_until: '', created_at: now, last_login_at: '' });
+        return { login_id: loginId, invite_code: code, note: '이 초대 코드는 한 번만 보여 드립니다. 로그인 화면의 «처음 오셨나요?» 에서 쓰세요.' };
+      });
+    }
+
+    function bulk(table, rows) {
+      if (!rows.length) return;
+      if (store.insertMany) store.insertMany(table, rows);
+      else rows.forEach(function (r) { store.insert(table, r); });
+    }
+
+    /** 새 초대 코드를 주고 비밀번호를 비운다 (비밀번호를 잊은 교사용). */
+    function resetInvite(loginId) {
+      return env.lock(function () {
+        var u = where('Users', function (x) { return x.login_id.toLowerCase() === String(loginId).toLowerCase(); })[0];
+        if (!u) fail('NOT_FOUND', '그 아이디의 계정이 없습니다.');
+        var now = nowIso(), code = newInviteCode(), salt = env.randomHex(16);
+        store.update('Users', u.user_id, { salt: salt, credential_hash: '', invite_hash: hashSecret(normInvite(code), salt),
+          invite_expires: hoursFrom(now, C.INVITE_DAYS * 24), failed_count: 0, locked_until: '' });
+        where('Sessions', function (s) { return s.user_id === u.user_id; }).forEach(function (s) { store.remove('Sessions', s.token_hash); });
+        audit('admin', 'reset_invite', u.user_id, '');
+        return { login_id: u.login_id, invite_code: code };
+      });
+    }
+
+    function seed(vocabJson, examples) {
+      examples = examples || {};
+      return env.lock(function () {
+        function missing(t, rows) { var have = {}, k = keyOf(t); all(t).forEach(function (r) { have[r[k]] = true; }); return rows.filter(function (r) { return !have[r[k]]; }); }
+        var vs = missing('Vocabulary', vocabJson.vocabulary.map(function (v) { return Object.assign({ edited_at: '', edited_by: '' }, v); }));
+        bulk('Vocabulary', vs);
+        bulk('VocabularySources', missing('VocabularySources', vocabJson.sources));
+        bulk('VocabularyRelations', missing('VocabularyRelations', vocabJson.relations));
+        bulk('WritingPrompts', missing('WritingPrompts', vocabJson.prompts.map(function (s) {
+          return Object.assign({ example: examples[s.prompt_id] || '', origin: 'SEED', edited_at: '', edited_by: '' }, s); })));
+        return { vocabulary_added: vs.length };
+      });
+    }
+
+    return { handle: handle, createTeacher: createTeacher, resetInvite: resetInvite, seed: seed, actions: Object.keys(H) };
+  }
+
+  return {
+    create: create, TABLES: TABLES, C: C, RUBRIC: RUBRIC, RUBRIC_LABEL: RUBRIC_LABEL, SCENES: SCENES, SCENE_LABEL: SCENE_LABEL,
+    toRow: toRow, fromRow: fromRow, colName: colName, keyOf: keyOf,
+    util: { norm: norm, trim: trim, vocabStatus: vocabStatus, computeSteps: computeSteps, submittedScenes: submittedScenes, nextReview: nextReview, BOX_DAYS: BOX_DAYS }
+  };
+})();
+
+/* ================================================================
+   Store.gs
+   ================================================================ */
+/**
+ * 구글 스프레드시트 저장소 — Core.gs 가 요구하는 store 인터페이스를 시트 한 장 = 표 하나로 구현한다.
+ *  · 첫 줄은 열 제목, 첫 열이 기본키
+ *  · 한 번의 요청 안에서는 읽은 표를 메모리에 두고 쓴다. 잠금을 잡을 때마다 비우고 다시 읽는다(invalidate).
+ *  · 모든 글 칸은 «일반 텍스트» 서식이라 날짜 모양 글자가 자동으로 날짜로 바뀌지 않는다.
+ */
+function SheetsStore_(ss) {
+  var T = VocabCore.TABLES;
+  var cache = {};
+
+  function sheetOf(t) {
+    var sh = ss.getSheetByName(t);
+    if (!sh) throw new Error('시트가 없습니다: ' + t + ' (setup() 을 먼저 실행하세요)');
+    return sh;
+  }
+
+  function load(t) {
+    if (cache[t]) return cache[t];
+    var sh = sheetOf(t), n = T[t].length, last = sh.getLastRow();
+    var vals = last > 1 ? sh.getRange(2, 1, last - 1, n).getValues() : [];
+    var objs = vals.map(function (r) { return VocabCore.fromRow(t, r); });
+    var index = {};
+    objs.forEach(function (o, i) { index[o[VocabCore.keyOf(t)]] = i; });
+    cache[t] = { objs: objs, index: index };
+    return cache[t];
+  }
+
+  return {
+    invalidate: function () { cache = {}; },
+
+    ensure: function () {
+      Object.keys(T).forEach(function (t) {
+        var sh = ss.getSheetByName(t);
+        var heads = T[t].map(VocabCore.colName);
+        if (!sh) sh = ss.insertSheet(t);
+        sh.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight('bold').setBackground('#eef2ff');
+        sh.setFrozenRows(1);
+        T[t].forEach(function (c, i) {
+          var isNum = c.indexOf(':n') > 0;
+          sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat(isNum ? '0' : '@');
+        });
+      });
+      var first = ss.getSheetByName('Sheet1') || ss.getSheetByName('시트1');
+      if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
+    },
+
+    all: function (t) { return load(t).objs; },
+
+    get: function (t, id) {
+      var c = load(t), i = c.index[id];
+      return i === undefined ? null : c.objs[i];
+    },
+
+    insert: function (t, obj) {
+      var c = load(t), sh = sheetOf(t);
+      var row = VocabCore.toRow(t, obj);
+      var r = sh.getLastRow() + 1;
+      sh.getRange(r, 1, 1, row.length).setValues([row]);
+      var o = VocabCore.fromRow(t, row);
+      c.objs.push(o);
+      c.index[o[VocabCore.keyOf(t)]] = c.objs.length - 1;
+      return o;
+    },
+
+    insertMany: function (t, objs) { // 한 번에 여러 줄 (처음 어휘를 넣을 때 쓴다)
+      var c = load(t), sh = sheetOf(t);
+      var rows = objs.map(function (o) { return VocabCore.toRow(t, o); });
+      if (!rows.length) return;
+      var r = sh.getLastRow() + 1;
+      sh.getRange(r, 1, rows.length, rows[0].length).setValues(rows);
+      rows.forEach(function (row) {
+        var o = VocabCore.fromRow(t, row);
+        c.objs.push(o);
+        c.index[o[VocabCore.keyOf(t)]] = c.objs.length - 1;
+      });
+    },
+
+    update: function (t, id, patch) {
+      var c = load(t), i = c.index[id];
+      if (i === undefined) throw new Error('행이 없습니다: ' + t + '/' + id);
+      var merged = Object.assign({}, c.objs[i], patch);
+      var row = VocabCore.toRow(t, merged);
+      sheetOf(t).getRange(i + 2, 1, 1, row.length).setValues([row]);
+      c.objs[i] = VocabCore.fromRow(t, row);
+      return c.objs[i];
+    },
+
+    remove: function (t, id) {
+      var c = load(t), i = c.index[id];
+      if (i === undefined) return false;
+      sheetOf(t).deleteRow(i + 2);
+      delete cache[t]; // 행 번호가 밀리므로 다시 읽는다
+      return true;
+    }
+  };
+}
+
+/* ================================================================
+   Code.gs
+   ================================================================ */
+/**
+ * Apps Script 웹앱 진입점.
+ *  · 화면(GitHub Pages)이 POST 로 {action, token, payload, req_id} 를 보내면 Core 가 처리한다.
+ *  · 웹앱 주소(URL)가 공개여도 안전한 이유: 모든 요청이 서버에서 로그인 토큰과 역할·소유권을 검사한다. (Core.gs)
+ *  · 비밀값(pepper)은 이 파일이 아닌 «스크립트 속성» 에 있다.
+ */
+
+function props_() { return PropertiesService.getScriptProperties(); }
+
+function pepper_() {
+  var p = props_(), v = p.getProperty('PEPPER');
+  if (!v) { v = randomHex_(32); p.setProperty('PEPPER', v); }
+  return v;
+}
+
+function randomHex_(n) { // Utilities.getUuid() 는 java.util.UUID.randomUUID() (SecureRandom) 기반이다
+  var s = '';
+  while (s.length < n * 2) s += Utilities.getUuid().replace(/-/g, '');
+  return s.substr(0, n * 2);
+}
+
+function spreadsheet_() {
+  var id = props_().getProperty('SPREADSHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('스프레드시트에 연결된 스크립트가 아닙니다.');
+  return ss;
+}
+
+function newCore_() {
+  var store = SheetsStore_(spreadsheet_());
+  var lock = LockService.getScriptLock();
+  var env = {
+    store: store,
+    sha256Hex: sha256Hex,
+    randomHex: randomHex_,
+    pepper: pepper_(),
+    now: function () { return new Date().toISOString(); },
+    lock: function (fn) {
+      lock.waitLock(25000); // 동시에 저장하려는 요청은 차례로 처리한다 (덮어쓰기·유실 방지)
+      try { store.invalidate(); return fn(); } finally { lock.releaseLock(); }
+    },
+    log: function (e) { console.error(e && e.stack ? e.stack : e); }
+  };
+  return VocabCore.create(env);
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var res;
+  try {
+    var raw = e && e.postData && e.postData.contents;
+    if (!raw || raw.length > 200000) return json_({ ok: false, error: { code: 'BAD_REQUEST', message: '요청이 올바르지 않습니다.' } });
+    res = newCore_().handle(JSON.parse(raw));
+  } catch (err) {
+    console.error(err && err.stack ? err.stack : err);
+    res = { ok: false, error: { code: err && err.message && /Lock/i.test(err.message) ? 'BUSY' : 'INTERNAL',
+      message: '서버가 바쁘거나 문제가 생겼습니다. 잠시 뒤에 다시 해 보세요.' } };
+  }
+  return json_(res);
+}
+
+function doGet() { // 주소를 직접 열어 보았을 때: 서버가 살아 있는지만 알려 준다 (데이터는 돌려주지 않는다)
+  return json_({ ok: true, service: 'vocab-power-server', version: 1 });
+}
+
+/* ================================================================
+   Setup.gs
+   ================================================================ */
+/**
+ * 처음 한 번 하는 설치와 관리용 함수. Apps Script 편집기에서 함수를 골라 ▶ 실행으로 쓴다.
+ * (웹으로는 열리지 않는다 — doPost 가 부르는 목록에 없다.)
+ *
+ * 순서:  1) CONFIG 의 값을 채운다  2) setup 실행  3) 실행 로그에 나온 교사 초대 코드를 받아 적는다
+ */
+var CONFIG = {
+  // 어휘 데이터가 올라간 주소 (GitHub Pages 에 배포한 뒤의 vocab.json 주소)
+  SEED_URL: 'https://여기에-깃허브-아이디.github.io/저장소이름/data/vocab.json',
+  TEACHER_ID: 'teacher',          // 선생님 로그인 아이디
+  TEACHER_NAME: '선생님',         // 화면에 보일 이름
+  BACKUP_FOLDER_NAME: '학습도구어_백업', // 드라이브에 만들 백업 폴더
+  BACKUP_KEEP: 14                 // 백업 파일을 몇 개까지 남길지
+};
+
+function setup() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  props_().setProperty('SPREADSHEET_ID', ss.getId());
+  pepper_();
+  var store = SheetsStore_(ss);
+  store.ensure();
+  var core = newCore_();
+
+  var data = JSON.parse(UrlFetchApp.fetch(CONFIG.SEED_URL, { muteHttpExceptions: false }).getContentText());
+  var r = core.seed(data, typeof SEED_EXAMPLES !== 'undefined' ? SEED_EXAMPLES : {});
+  Logger.log('어휘 ' + r.vocabulary_added + '개를 시트에 넣었습니다.');
+
+  try {
+    var t = core.createTeacher(CONFIG.TEACHER_ID, CONFIG.TEACHER_NAME);
+    Logger.log('교사 계정 «' + t.login_id + '» 초대 코드: ' + t.invite_code + '  (14일 안에 로그인 화면 «처음 오셨나요?» 에서 쓰세요)');
+  } catch (e) {
+    Logger.log('교사 계정: ' + e.message + ' — 이미 있으면 newTeacherCode() 로 새 코드를 만드세요.');
+  }
+}
+
+/** 비밀번호를 잊은 교사에게 새 초대 코드를 준다 (새 코드로 다시 비밀번호를 만들게 한다). */
+function newTeacherCode() {
+  props_().setProperty('SPREADSHEET_ID', SpreadsheetApp.getActiveSpreadsheet().getId());
+  var r = newCore_().resetInvite(CONFIG.TEACHER_ID);
+  Logger.log('«' + r.login_id + '» 새 초대 코드: ' + r.invite_code + '  (14일 안에 «처음 오셨나요?» 에서 쓰세요)');
+}
+
+/** 스프레드시트 전체를 드라이브 폴더에 날짜 이름으로 복사한다. 시간 기반 트리거(매일 밤)로 걸어 두면 자동 백업이 된다. */
+function backupToDrive() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var folders = DriveApp.getFoldersByName(CONFIG.BACKUP_FOLDER_NAME);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(CONFIG.BACKUP_FOLDER_NAME);
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyyMMdd-HHmm');
+  DriveApp.getFileById(ss.getId()).makeCopy('학습도구어_백업_' + stamp, folder);
+  var files = [], it = folder.getFiles();
+  while (it.hasNext()) files.push(it.next());
+  files.sort(function (a, b) { return b.getDateCreated() - a.getDateCreated(); });
+  files.slice(CONFIG.BACKUP_KEEP).forEach(function (f) { f.setTrashed(true); });
+  Logger.log('백업 완료: ' + stamp + ' (보관 ' + Math.min(files.length, CONFIG.BACKUP_KEEP) + '개)');
+}
+
+/** 매일 밤 2시에 backupToDrive 를 돌리는 트리거를 만든다 (한 번만 실행). */
+function installNightlyBackup() {
+  ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'backupToDrive'; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('backupToDrive').timeBased().everyDays(1).atHour(2).create();
+  Logger.log('매일 밤 2시 자동 백업을 켰습니다.');
+}
+
+/** 만료된 세션과 오래된 중복 방지 기록을 정리한다 (필요할 때 실행). */
+function cleanup() {
+  var store = SheetsStore_(SpreadsheetApp.getActiveSpreadsheet());
+  var now = new Date().toISOString(), n = 0;
+  store.all('Sessions').filter(function (s) { return s.expires_at < now; }).forEach(function (s) { store.remove('Sessions', s.token_hash); n++; });
+  store.all('ReqLog').filter(function (r) { return r.created_at < new Date(Date.now() - 36e5).toISOString(); }).forEach(function (r) { store.remove('ReqLog', r.req_id); n++; });
+  Logger.log('정리한 줄: ' + n);
+}
+
+/* ================================================================
+   SeedExamples.gs
+   ================================================================ */
+/** 자동 생성(tools/build_data.py) — 작문 «예시 문장». 학생 화면에는 서버가 «먼저 쓴 뒤에만» 내려 준다. */
+var SEED_EXAMPLES = {
+ "P-S001-S": "소설 「소나기」가 연극 대본으로 각색되면서 긴 서술은 대사로 바뀌었다.",
+ "P-S001-D": "친구가 즐겨 보던 웹툰이 드라마로 각색되어 결말이 달라졌다.",
+ "P-S001-W": "옛 동화가 뮤지컬로 각색될 때는 노래와 춤에 맞게 줄거리가 줄어든다.",
+ "P-S002-S": "이 문장은 친구의 말을 그대로 옮기지 않고 간접 인용으로 바꾸어 쓴 것이다.",
+ "P-S002-D": "동생은 친구를 거쳐 간접적으로 들은 엄마의 말을 잘못 이해했다.",
+ "P-S002-W": "전해 들은 말을 간접적으로 보도할 때는 사실과 다른지 확인해야 한다.",
+ "P-S003-S": "연구팀은 열에 강한 새 소재를 개발하기 위해 여러 번 실험했다.",
+ "P-S003-D": "우리 반은 알림 기능이 있는 학급 앱을 직접 개발해 보기로 했다.",
+ "P-S003-W": "값싼 정수 장치를 개발한 덕분에 깨끗한 물을 마시는 사람이 늘었다.",
+ "P-S004-S": "수행평가에서는 모둠 토의 뒤에 각자의 생각을 개별적으로 정리해 냈다.",
+ "P-S004-D": "같은 운동을 하더라도 선생님은 우리의 수준에 맞게 개별적으로 도와주셨다.",
+ "P-S004-W": "병원은 환자의 상태에 따라 치료법을 개별적으로 정한다.",
+ "P-S005-S": "논설문을 쓰기 전에 개요를 짜 보니 글의 흐름이 한눈에 보였다.",
+ "P-S005-D": "여행 전날 일정의 개요만 적어 두어도 마음이 한결 놓인다.",
+ "P-S005-W": "기사 첫 문단에는 사건의 개요가 간추려져 있어 독자가 빨리 읽을 수 있다.",
+ "P-S006-S": "보도 기사는 사실에 근거해 객관적으로 써야 한다.",
+ "P-S006-D": "싸운 일을 선생님께 말씀드릴 때는 내 기분보다 일어난 일을 객관적으로 말했다.",
+ "P-S006-W": "같은 경기도 응원하는 팀과 상관없이 객관적으로 전하는 보도가 믿음을 얻는다.",
+ "P-S007-S": "진로 활동 시간에 내 재능을 계발하려면 무엇부터 해야 할지 적어 보았다.",
+ "P-S007-D": "친구는 방과후 활동에서 그림 실력을 계발하며 자신감을 얻었다.",
+ "P-S007-W": "지역 예술 지원 프로그램은 청소년의 잠재력을 계발하는 데 도움이 된다.",
+ "P-S008-S": "직업에 대한 성별 고정 관념이 글 속 인물의 행동에 드러난다.",
+ "P-S008-D": "‘이 동네 아이들은 이럴 것이다’라는 고정 관념이 친구를 불편하게 했다.",
+ "P-S008-W": "광고가 늘 같은 성별만 보여 주는 것은 고정 관념을 굳히는 일이 될 수 있다.",
+ "P-S009-S": "도덕 시간에 공리를 중요하게 보는 입장과 개인의 권리를 앞세우는 입장을 비교했다.",
+ "P-S009-D": "청소 구역을 정할 때 모두에게 도움이 되는 공리를 생각해 보았다.",
+ "P-S009-W": "주차장과 공원 중 무엇을 지을지는 공리를 따져 보고 정해야 한다.",
+ "P-S010-S": "우리 모둠은 실험 결과를 온라인 문서로 공유해 함께 정리했다.",
+ "P-S010-D": "가족이 태블릿을 공유하려면 사용 시간을 미리 정해야 한다.",
+ "P-S010-W": "공유 자전거가 늘면서 사람들이 물건을 소유하지 않고 나눠 쓰게 되었다.",
+ "P-S011-S": "같은 사건이라도 목격자의 관점에서 쓴 글은 피해자의 글과 느낌이 다르다.",
+ "P-S011-D": "급식 메뉴를 두고 친구들의 관점이 달라서 이야기가 길어졌다.",
+ "P-S011-W": "환경 개발 문제는 주민과 기업의 관점을 모두 들어 봐야 한다.",
+ "P-S012-S": "비단길을 통해 동서의 문화가 활발히 교류하면서 새로운 물건과 생각이 퍼졌다.",
+ "P-S012-D": "다른 학교 친구와 편지를 주고받으며 서로의 일상을 교류하고 있다.",
+ "P-S012-W": "청소년 국제 교류 행사는 서로 다른 문화를 이해하는 계기가 된다.",
+ "P-S013-S": "조선 후기에는 청과의 교역이 늘면서 새로운 물건이 들어왔다.",
+ "P-S013-D": "교실 장터에서 친구들이 물건을 교역하며 서로 필요한 것을 구했다.",
+ "P-S013-W": "항구가 막혀 나라 사이 교역이 줄자 수입 물건 값이 올랐다.",
+ "P-S014-S": "주장을 뒷받침하려면 구체적인 사례를 들어 설명해야 한다.",
+ "P-S014-D": "‘이따 만나자’보다 ‘네 시에 도서관 앞에서 만나자’처럼 구체적으로 말해야 오해가 없다.",
+ "P-S014-W": "정책 발표에는 언제까지 무엇을 하겠다는 구체적인 계획이 들어 있어야 한다.",
+ "P-S015-S": "여러 수 배열을 살펴보고 귀납적으로 규칙을 찾아 식으로 나타냈다.",
+ "P-S015-D": "비 오는 날마다 지각한 친구를 보고 귀납적으로 판단했지만 모든 경우에 맞는 것은 아니다.",
+ "P-S015-W": "전국 설문 결과를 귀납적으로 해석할 때는 표본이 충분한지 따져 보아야 한다.",
+ "P-S016-S": "힘든 상황에서도 낙관적인 태도를 잃지 않은 인물이 끝내 문제를 풀어 나갔다.",
+ "P-S016-D": "시험을 망친 나에게 친구가 낙관적으로 말해 주어 마음이 풀렸다.",
+ "P-S016-W": "전문가들의 낙관적인 전망만 믿지 말고 근거가 있는지 살펴보아야 한다.",
+ "P-S017-S": "글을 읽을 때 스스로 질문하며 능동적으로 읽으면 내용이 오래 기억된다.",
+ "P-S017-D": "동아리에서 능동적으로 나서는 친구 덕분에 활동이 활기를 띠었다.",
+ "P-S017-W": "배움에서 능동적인 태도는 새로운 지식을 스스로 찾아 나서는 힘이 된다.",
+ "P-S018-S": "대화 장면의 담화는 말하는 이와 듣는 이, 상황을 함께 보아야 뜻이 이해된다.",
+ "P-S018-D": "급식실에서 오간 짧은 담화는 상황을 모르는 사람에게는 이해되지 않았다.",
+ "P-S018-W": "토론 방송의 담화에서 두 사람은 서로의 말을 존중하며 쟁점을 좁혔다.",
+ "P-S019-S": "조선 후기 붕당은 정책을 두고 서로 대립하며 정치를 이끌었다.",
+ "P-S019-D": "소풍 장소를 두고 두 의견이 대립했지만 투표로 풀었다.",
+ "P-S019-W": "국경 지역의 자원을 두고 두 나라가 대립하면서 긴장이 높아졌다.",
+ "P-S020-S": "교통 문제를 해결할 대안으로 학교 앞 횡단보도 신호를 늘리자고 제안했다.",
+ "P-S020-D": "체육관이 닫히자 운동장에서 하는 체육 수업이 대안으로 나왔다.",
+ "P-S020-W": "플라스틱 빨대의 대안으로 쌀 빨대를 쓰는 가게가 늘고 있다.",
+ "P-S021-S": "두 집합에서 각 원소가 짝이 되도록 대응하다 보면 일대일 관계를 알 수 있다.",
+ "P-S021-D": "갑자기 소나기가 오자 우리는 상황에 맞게 우산을 나눠 쓰며 대응했다.",
+ "P-S021-W": "지자체는 폭염에 대응하여 무더위 쉼터를 늘렸다.",
+ "P-S022-S": "부모님께 감사하는 마음을 표현하는 것은 자식으로서 마땅한 도리이다.",
+ "P-S022-D": "이웃 어른께 인사드리는 것도 사람의 도리라고 배웠다.",
+ "P-S022-W": "재난 때 서로 돕는 모습은 사람의 도리가 무엇인지 보여 준다.",
+ "P-S023-S": "이 식을 만족하는 값을 모두 찾아 쓰시오.",
+ "P-S023-D": "새 운동화가 기대한 만큼 편해서 크게 만족했다.",
+ "P-S023-W": "서비스에 만족하는 정도는 사람마다 달라서 설문 결과가 갈렸다.",
+ "P-S024-S": "신문과 영상 뉴스는 매체의 특성에 따라 같은 사건을 다르게 전한다.",
+ "P-S024-D": "급한 일은 전화가 편하고 자료는 단체 대화방이 편해서 내용에 맞는 매체를 고른다.",
+ "P-S024-W": "짧은 영상 매체가 늘면서 사람들이 뉴스를 접하는 방식이 달라졌다.",
+ "P-S025-S": "같은 말도 맥락에 따라 뜻이 달라지므로 앞뒤 상황을 함께 살펴야 한다.",
+ "P-S025-D": "친구의 ‘괜찮아’가 맥락에 따라 다른 뜻으로 들릴 수 있다는 것을 알았다.",
+ "P-S025-W": "한 문장만 잘라 퍼뜨리면 맥락이 사라져 오해가 생길 수 있다.",
+ "P-S026-S": "조선 후기 농민들은 지나친 세금에 맞서 반란을 일으켰다.",
+ "P-S026-D": "급식 개선을 요구하며 학생들이 낸 항의서는 작은 반란처럼 느껴졌다.",
+ "P-S026-W": "군부가 정권에 맞서 일으킨 반란이 나라를 혼란에 빠뜨렸다.",
+ "P-S027-S": "이 소설에는 그 시대 사람들의 생활 모습이 반영되어 있다.",
+ "P-S027-D": "우리 반 의견이 학급 규칙에 반영되어서 뿌듯했다.",
+ "P-S027-W": "시민들의 제안이 새 조례에 반영되었다는 소식을 들었다.",
+ "P-S028-S": "농업 기술이 발달하자 인구가 늘고 도시가 커졌다.",
+ "P-S028-D": "동생의 말하기 실력이 몇 달 사이에 놀랍게 발달했다.",
+ "P-S028-W": "인공지능이 발달하면서 사라지는 직업과 새로 생기는 직업이 함께 늘고 있다.",
+ "P-S029-S": "신문물을 받아들이며 나라가 발전해 나간 과정을 살펴보았다.",
+ "P-S029-D": "지난 학기보다 달리기 기록이 나아져 발전한 내가 뿌듯했다.",
+ "P-S029-W": "지역 경제의 발전을 위한 계획은 주민의 삶도 함께 고려해야 한다.",
+ "P-S030-S": "축구에 대한 배경지식이 있으면 경기 해설을 훨씬 쉽게 이해한다.",
+ "P-S030-D": "낯선 글을 읽을 때 미리 아는 배경지식을 떠올리면 이해가 빨라진다.",
+ "P-S030-W": "우주 탐사 뉴스를 읽으려면 기본적인 배경지식이 필요하다.",
+ "P-S031-S": "글을 쓸 때는 근거가 약한 정보를 배제해야 설득력이 높아진다.",
+ "P-S031-D": "모둠 활동에서 친구를 배제하지 않도록 모두에게 역할을 나누었다.",
+ "P-S031-W": "일부 계층을 배제한 정책은 형평성 논란을 일으킨다.",
+ "P-S032-S": "친구의 글에서 부족한 근거를 보완해 주니 글이 훨씬 탄탄해졌다.",
+ "P-S032-D": "발표 자료에 그림을 더 넣어 부족한 점을 보완했다.",
+ "P-S032-W": "법의 빈틈을 보완하기 위해 새 조항이 만들어졌다.",
+ "P-S033-S": "문화재는 원래의 모습을 보존하기 위해 온도와 습도를 관리한다.",
+ "P-S033-D": "할머니의 오래된 사진첩은 상하지 않게 잘 보존하고 있다.",
+ "P-S033-W": "멸종 위기 동물을 보존하는 일은 생태계를 지키는 일이다.",
+ "P-S034-S": "공감과 사랑은 문화가 달라도 통하는 보편적인 주제이다.",
+ "P-S034-D": "‘고마워’라는 말은 누구에게나 기분 좋게 들리는 보편적인 표현이다.",
+ "P-S034-W": "인권은 모든 사람에게 보편적으로 적용되어야 하는 가치이다.",
+ "P-S035-S": "스마트폰이 보편화되면서 온라인 예절이 중요해졌다.",
+ "P-S035-D": "우리 반 대부분이 같은 앱을 쓰게 되어 보편화된 것을 느꼈다.",
+ "P-S035-W": "전기 자동차의 보편화에 맞춰 충전 시설도 늘어나야 한다.",
+ "P-S036-S": "광고는 상품의 장점을 부각하여 소비자의 관심을 끈다.",
+ "P-S036-D": "자기소개에서 내 장점을 부각해서 이야기했다.",
+ "P-S036-W": "선거 포스터가 한 가지 공약만 부각하면 다른 정책은 가려질 수 있다.",
+ "P-S037-S": "소금물에서 소금과 물을 분리하려면 물을 증발시키면 된다.",
+ "P-S037-D": "분리수거를 할 때는 병과 뚜껑을 분리해서 버려야 한다.",
+ "P-S037-W": "바다에 퍼진 기름을 물에서 분리하는 일은 매우 어렵다.",
+ "P-S038-S": "실험 결과를 표로 정리하고 분석해 보니 온도가 높을수록 빨리 녹았다.",
+ "P-S038-D": "내 오답을 유형별로 분석해 보니 계산 실수가 가장 많았다.",
+ "P-S038-W": "전문가들은 경제 지표 변화를 분석하여 앞으로의 흐름을 전망했다.",
+ "P-S039-S": "물을 전기로 분해하면 수소와 산소를 얻을 수 있다.",
+ "P-S039-D": "고장 난 장난감을 분해해 보니 작은 부품이 빠져 있었다.",
+ "P-S039-W": "플라스틱은 땅속에서 잘 분해되지 않아 환경 문제를 일으킨다.",
+ "P-S040-S": "물건의 개수와 값은 서로 비례하므로 두 배를 사면 값도 두 배가 된다.",
+ "P-S040-D": "물을 오래 틀수록 수도 요금이 비례해서 늘어난다.",
+ "P-S040-W": "인구가 늘면 쓰레기 양도 비례해서 늘어나는 경향이 있다.",
+ "P-S041-S": "이별을 다룬 시에서는 화자의 비애가 쓸쓸한 말투에서 느껴진다.",
+ "P-S041-D": "오래 키운 화분이 시들자 말로 다 못할 비애를 느꼈다.",
+ "P-S041-W": "전쟁으로 고향을 떠난 사람들의 비애를 우리는 헤아려야 한다.",
+ "P-S042-S": "글에서 자주 쓰인 낱말의 빈도를 세어 보면 중심 내용을 짐작할 수 있다.",
+ "P-S042-D": "우리 반 지각 빈도를 요일별로 세어 보니 월요일이 가장 많았다.",
+ "P-S042-W": "뉴스에 어떤 낱말이 나오는 빈도가 늘어나면 사회의 관심이 커졌다는 뜻이다.",
+ "P-S043-S": "‘크다’는 무엇과 비교하느냐에 따라 상대적으로 달라지는 말이다.",
+ "P-S043-D": "농구부에서는 내 키가 상대적으로 작게 느껴졌다.",
+ "P-S043-W": "같은 소득이라도 물가가 다르면 상대적으로 느끼는 형편이 다르다.",
+ "P-S044-S": "소금물을 식히자 소금이 석출되어 바닥에 결정이 생겼다.",
+ "P-S044-D": "겨울에 컵에 탄 설탕이 식으면서 석출되어 알갱이로 남았다.",
+ "P-S044-W": "소금 결정이 석출되는 염전의 원리를 이용해 소금을 얻는다.",
+ "P-S045-S": "토론 주제는 모둠 의견을 모아 가장 관심이 높은 것으로 선정했다.",
+ "P-S045-D": "학급 대표 노래를 여러 후보 가운데 투표로 선정했다.",
+ "P-S045-W": "공정한 절차를 거쳐 올해의 도서를 선정했다.",
+ "P-S046-S": "풍선 자동차를 만들기 전에 바퀴 위치까지 꼼꼼히 설계했다.",
+ "P-S046-D": "책상 배치를 바꾸기 전에 그림으로 설계해 보니 공간이 넉넉했다.",
+ "P-S046-W": "건축가는 지진에도 견딜 수 있도록 건물을 설계했다.",
+ "P-S047-S": "근거가 구체적일수록 글의 설득력이 높아진다.",
+ "P-S047-D": "친구를 도서관에 데려가려고 이유를 말했는데 설득력이 있었는지 궁금했다.",
+ "P-S047-W": "연설이 설득력을 가지려면 사실에 바탕을 두고 있어야 한다.",
+ "P-S048-S": "세 변의 길이가 조건을 만족해야 삼각형이 성립한다.",
+ "P-S048-D": "합동 응원 약속은 양쪽 반이 모두 동의해야 성립한다.",
+ "P-S048-W": "두 나라가 서명해야 조약이 성립하여 효력을 가진다.",
+ "P-S049-S": "하루를 돌아보는 일기는 나를 성찰하는 좋은 방법이다.",
+ "P-S049-D": "친구에게 심한 말을 한 날 밤에는 내 행동을 성찰하며 사과의 말을 고민했다.",
+ "P-S049-W": "잘못을 성찰하는 사과문은 다시 반복하지 않겠다는 다짐이 담겨야 한다.",
+ "P-S050-S": "호족이 지방에서 세력을 키우자 중앙 정부의 힘이 약해졌다.",
+ "P-S050-D": "동아리 선거에서 한 무리가 세력을 모아 목소리를 크게 냈다.",
+ "P-S050-W": "큰 나라들의 세력이 커지면 작은 나라의 목소리는 묻히기 쉽다.",
+ "P-S051-S": "피동 표현은 행동의 주체보다 당한 쪽을 중심으로 하여 수동적인 느낌을 준다.",
+ "P-S051-D": "시켜야만 움직이는 수동적인 태도는 스스로 하는 습관을 가로막는다.",
+ "P-S051-W": "수동적으로 일하는 직원이 많은 조직은 새로운 시도를 하기 어렵다.",
+ "P-S052-S": "곤충을 수집하고 관찰한 내용을 기록하면 자료가 쌓인다.",
+ "P-S052-D": "좋아하는 스티커를 수집하는 일은 작은 즐거움을 준다.",
+ "P-S052-W": "기상청은 전국의 날씨 자료를 수집하여 예보에 활용한다.",
+ "P-S053-S": "프로젝트 수행 과정을 단계별로 기록하면 문제를 찾기 쉽다.",
+ "P-S053-D": "청소 당번은 수행 과정을 순서대로 알고 있으면 빠뜨리지 않는다.",
+ "P-S053-W": "공사의 안전 점검 수행 과정을 공개하면 시민이 믿을 수 있다.",
+ "P-S054-S": "새 과자가 시중에 나오면서 광고도 함께 퍼졌다.",
+ "P-S054-D": "우리 동네 가게마다 시중 가격이 조금씩 달랐다.",
+ "P-S054-W": "시중 금리가 오르면 대출을 받은 사람의 부담도 커진다.",
+ "P-S055-S": "가정에서 정한 절약 계획을 한 달간 시행해 보니 전기 요금이 줄었다.",
+ "P-S055-D": "우리 반이 정한 새 규칙을 다음 주부터 시행하기로 했다.",
+ "P-S055-W": "새 교통 법규를 시행하기 전에 충분히 알리는 것이 중요하다.",
+ "P-S056-S": "이미 증명된 성질에서 연역적으로 새로운 결론을 이끌어 냈다.",
+ "P-S056-D": "‘모든 새는 알을 낳는다’는 말에서 참새도 알을 낳는다고 연역적으로 생각했다.",
+ "P-S056-W": "법원은 헌법의 원칙에서 연역적으로 판결의 근거를 이끌어 냈다.",
+ "P-S057-S": "냉장고를 쓰면 음식을 보관하는 기간을 연장할 수 있다.",
+ "P-S057-D": "경기가 비기자 시간이 연장되어 연장전이 열렸다.",
+ "P-S057-W": "공사 기간이 연장되자 주민들의 불편도 길어졌다.",
+ "P-S058-S": "불교가 들어오면서 삼국의 건축과 예술에 큰 영향을 미쳤다.",
+ "P-S058-D": "전학 온 친구가 우리 반 분위기에 밝은 영향을 주었다.",
+ "P-S058-W": "기후 변화가 농산물 값에 미치는 영향이 점점 커지고 있다.",
+ "P-S059-S": "기온 자료를 바탕으로 내일 날씨를 예측하는 활동을 했다.",
+ "P-S059-D": "구름이 낀 것을 보고 비가 올 것을 예측해 우산을 챙겼다.",
+ "P-S059-W": "인공지능이 주가를 예측한다고 해도 틀릴 가능성은 늘 있다.",
+ "P-S060-S": "일부 사실만 보여 주는 광고는 소비자의 생각을 왜곡할 수 있다.",
+ "P-S060-D": "친구가 내 말을 자기 편한 대로 왜곡해서 전해 속상했다.",
+ "P-S060-W": "가짜 뉴스는 역사를 왜곡하여 사람들을 오해하게 만든다.",
+ "P-S061-S": "이야기는 인물, 사건, 배경이라는 요소로 이루어진다.",
+ "P-S061-D": "떡볶이의 맛을 결정하는 요소로 소스와 면의 쫄깃함을 꼽았다.",
+ "P-S061-W": "살기 좋은 도시를 이루는 요소에는 안전과 교통, 환경이 있다.",
+ "P-S062-S": "학교 규칙에서 용인할 수 있는 행동과 그렇지 않은 행동을 구분했다.",
+ "P-S062-D": "급식 줄을 먼저 서는 것을 한 번 용인하면 계속 반복될 수 있다.",
+ "P-S062-W": "저작권을 어긴 행동을 용인하는 분위기는 창작자에게 피해를 준다.",
+ "P-S063-S": "행복의 원천은 거창한 곳이 아니라 일상 속에 있다는 글을 읽었다.",
+ "P-S063-D": "내 용기의 원천은 늘 응원해 주시는 가족이다.",
+ "P-S063-W": "태양은 재생 에너지의 원천이 되는 중요한 자원이다.",
+ "P-S064-S": "남의 사진을 허락 없이 유포하는 것은 큰 피해를 준다.",
+ "P-S064-D": "단체 대화방에서 소문이 유포되자 친구가 마음고생을 했다.",
+ "P-S064-W": "허위 정보를 유포한 사람은 처벌받을 수 있다.",
+ "P-S065-S": "먼지가 몸에 유해한 이유를 실험으로 확인했다.",
+ "P-S065-D": "야식으로 먹은 자극적인 음식이 몸에 유해하다는 것을 느꼈다.",
+ "P-S065-W": "청소년에게 유해한 매체를 규제하는 문제를 두고 의견이 갈린다.",
+ "P-S066-S": "불교와 토착 신앙이 융합되어 한국만의 독특한 문화가 만들어졌다.",
+ "P-S066-D": "김치와 치즈를 융합한 음식이 인기를 끌었다.",
+ "P-S066-W": "여러 분야가 융합된 새로운 직업이 늘어나고 있다.",
+ "P-S067-S": "직업을 통해 사회에 이바지하는 방법을 모둠에서 이야기했다.",
+ "P-S067-D": "학급 도서 정리를 맡아 친구들이 책을 찾기 쉽게 이바지했다.",
+ "P-S067-W": "연구자의 발견이 의료 발전에 이바지했다.",
+ "P-S068-S": "내가 그리는 이상은 모두가 서로 존중하는 교실이다.",
+ "P-S068-D": "이상적인 휴일은 늦잠을 자고 가족과 산책하는 것이라고 친구가 말했다.",
+ "P-S068-W": "소설 속 이상 사회는 현실의 문제를 돌아보게 한다.",
+ "P-S069-S": "글쓴이는 환경 문제의 심각성을 인식하고 해결 방법을 제안했다.",
+ "P-S069-D": "내가 친구에게 상처를 준 것을 나중에야 인식했다.",
+ "P-S069-W": "사회가 문제를 뒤늦게 인식하면 해결도 늦어진다.",
+ "P-S070-S": "글의 주제와 문단의 내용이 일관성이 있어야 읽기 쉽다.",
+ "P-S070-D": "말과 행동이 일관성이 있는 친구는 믿음이 간다.",
+ "P-S070-W": "정책이 자주 바뀌면 일관성이 없다는 비판을 받는다.",
+ "P-S071-S": "대부분의 경우에 통하는 일반적인 설명과 예외를 구분해 보았다.",
+ "P-S071-D": "우리 반은 일반적으로 아침에 소란스럽지만 시험 날은 조용하다.",
+ "P-S071-W": "‘일반적인 가정’이라는 말은 다양한 가정을 놓칠 수 있다.",
+ "P-S072-S": "여러 계산 결과에서 공통된 규칙을 찾아 식으로 일반화했다.",
+ "P-S072-D": "두 명이 늦었다고 그 반 전체가 늦는다고 일반화하면 안 된다.",
+ "P-S072-W": "한 사건만 보고 청소년 전체를 일반화하는 보도는 위험하다.",
+ "P-S073-S": "속력이 일정하면 이동한 거리는 시간에 비례한다.",
+ "P-S073-D": "매일 일정한 시각에 일어나니 하루가 규칙적으로 흘러갔다.",
+ "P-S073-W": "공장에서는 제품의 품질이 일정하도록 계속 점검한다.",
+ "P-S074-S": "임의의 수 a를 넣어도 이 식이 성립하는지 확인했다.",
+ "P-S074-D": "제비뽑기로 임의의 친구를 뽑아 발표를 시켰다.",
+ "P-S074-W": "설문 조사는 임의의 사람들을 뽑아 해야 결과가 치우치지 않는다.",
+ "P-S075-S": "물질은 눈에 보이지 않는 아주 작은 입자로 이루어져 있다.",
+ "P-S075-D": "밀가루 입자가 바람에 날려 교실이 뿌옇게 변했다.",
+ "P-S075-W": "초미세 입자가 건강에 미치는 영향이 뉴스에 자주 나온다.",
+ "P-S076-S": "석유와 석탄 같은 자원은 한정되어 있어 아껴 써야 한다.",
+ "P-S076-D": "우리 집은 물과 전기 같은 자원을 아껴 쓰려고 노력한다.",
+ "P-S076-W": "물이 부족한 나라에서는 한정된 자원을 나누는 문제가 크다.",
+ "P-S077-S": "다 쓴 물건을 다시 쓰는 일은 자원 순환의 첫걸음이다.",
+ "P-S077-D": "헌 옷을 모아 기부하는 것도 자원 순환에 도움이 된다.",
+ "P-S077-W": "음식물 쓰레기로 비료를 만드는 도시는 자원 순환을 실천한 예이다.",
+ "P-S078-S": "근거가 주장에 알맞은지 적절성을 따져 보며 글을 고쳤다.",
+ "P-S078-D": "급식 시간에 큰 소리로 노래하는 것은 적절성이 떨어진다는 말을 들었다.",
+ "P-S078-W": "새 광고 문구의 적절성을 두고 시민들 사이에 논란이 일었다.",
+ "P-S079-S": "어려운 글은 제목과 소제목을 먼저 훑어보는 읽기 전략이 도움이 된다.",
+ "P-S079-D": "기말고사 전략으로 약한 과목부터 공부하기로 했다.",
+ "P-S079-W": "기업이 해외 시장에 진출하는 전략을 발표했다.",
+ "P-S080-S": "‘크다’처럼 비교와 상관없이 정해지는 뜻이 있는지 따져 보았다.",
+ "P-S080-D": "내 방법이 절대적으로 옳다고 우기면 대화가 끊긴다.",
+ "P-S080-W": "어떤 가치를 절대적으로 지켜야 하는지를 두고 토론이 벌어졌다.",
+ "P-S081-S": "토론에서 주제와 관련한 새로운 문제가 제기되었다.",
+ "P-S081-D": "학급 회의에서 청소 분담이 불공평하다는 의견이 제기되었다.",
+ "P-S081-W": "공공시설 이용료가 비싸다는 문제가 제기되어 주민 설명회가 열렸다.",
+ "P-S082-S": "우리 가족은 함께 모여 휴대 전화 사용 규칙을 제정했다.",
+ "P-S082-D": "우리 반 약속을 투표로 제정하니 모두가 더 잘 지켰다.",
+ "P-S082-W": "국회가 새 법률을 제정하여 곧 시행한다.",
+ "P-S083-S": "서로 다른 의견을 조정하려면 양쪽이 조금씩 양보해야 한다.",
+ "P-S083-D": "학원 시간과 동아리 시간이 겹쳐서 일정을 조정했다.",
+ "P-S083-W": "노사가 협상 끝에 임금 조건을 조정하여 합의했다.",
+ "P-S084-S": "다른 신분의 사람을 존중하는 모습이 역사 속 이야기에서 드러난다.",
+ "P-S084-D": "친구의 취미가 나와 달라도 존중하기로 했다.",
+ "P-S084-W": "서로의 문화를 존중해야 다양한 사람들이 함께 일할 수 있다.",
+ "P-S085-S": "이 문장에서 동작의 주체는 ‘우리’이다.",
+ "P-S085-D": "학급 행사를 학생들이 주체가 되어 이끌어 보니 책임감이 생겼다.",
+ "P-S085-W": "시민이 정책의 주체가 되어야 한다는 주장이 힘을 얻고 있다.",
+ "P-S086-S": "소비자 정보를 볼 때는 어느 한쪽에 치우치지 않은 중립 의견을 찾았다.",
+ "P-S086-D": "친구 둘이 다툴 때 나는 중립을 지키며 이야기를 들었다.",
+ "P-S086-W": "언론이 중립을 지키는 것이 늘 옳은지를 두고 토론이 열렸다.",
+ "P-S087-S": "환경을 해치지 않는 생활 방식이 지속 가능한 삶이라고 배웠다.",
+ "P-S087-D": "텀블러를 쓰는 습관은 불편하지 않아서 지속 가능하다.",
+ "P-S087-W": "지속 가능한 발전은 지금 세대와 다음 세대를 함께 생각하는 일이다.",
+ "P-S088-S": "인용한 말을 그대로 옮기는 방법을 직접 인용이라고 한다.",
+ "P-S088-D": "메신저로 묻는 대신 선생님을 직접 찾아가 여쭈어보니 설명이 분명했다.",
+ "P-S088-W": "기자가 현장에서 직접 취재한 영상은 더 믿을 만하다.",
+ "P-S089-S": "공직자는 사사로운 욕심 없이 청렴하게 일해야 한다.",
+ "P-S089-D": "친구는 선물을 받고도 점수를 올려 주지 않아 청렴한 모습을 보여 주었다.",
+ "P-S089-W": "공무원 청렴도 조사는 맑은 사회를 만드는 데 도움이 된다.",
+ "P-S090-S": "자료를 범주별로 체계적으로 정리하니 필요한 내용을 금방 찾았다.",
+ "P-S090-D": "서랍을 과목별로 정리했더니 체계적이라 물건을 쉽게 찾는다.",
+ "P-S090-W": "병원이 환자 기록을 체계적으로 관리해 오류를 줄였다.",
+ "P-S091-S": "이 영상은 장면의 초점이 주인공의 표정에 맞춰져 있다.",
+ "P-S091-D": "토론이 엉뚱하게 흐르자 핵심에 초점을 맞춰 다시 이야기했다.",
+ "P-S091-W": "선거 보도가 외모에만 초점을 맞춘다는 비판이 있다.",
+ "P-S092-S": "식물의 성장을 촉진하려면 햇빛과 물을 알맞게 주어야 한다.",
+ "P-S092-D": "칭찬은 동생이 공부를 즐기도록 촉진하는 힘이 되었다.",
+ "P-S092-W": "정부는 수출을 촉진하기 위해 중소기업에 지원금을 주기로 했다.",
+ "P-S093-S": "정직의 가치를 추구하며 살아간 인물의 이야기를 읽었다.",
+ "P-S093-D": "친구는 꿈을 추구하며 매일 한 시간씩 연습한다.",
+ "P-S093-W": "기업이 이윤만이 아니라 사회적 가치를 추구한다고 밝혔다.",
+ "P-S094-S": "알려진 사실을 바탕으로 새로운 사실을 추론해 보았다.",
+ "P-S094-D": "바닥에 젖은 우산이 있는 것을 보고 비가 온다고 추론했다.",
+ "P-S094-W": "수사관은 현장의 흔적을 근거로 사건 과정을 추론했다.",
+ "P-S095-S": "집을 고를 때 필요한 조건을 충족하는지 목록으로 점검했다.",
+ "P-S095-D": "동아리 가입 조건을 모두 충족해서 신청서를 냈다.",
+ "P-S095-W": "조건을 충족하지 못한 곳에는 지원금이 지급되지 않았다.",
+ "P-S096-S": "눈금실린더로 물의 부피를 측정할 때는 눈높이를 눈금에 맞춰야 한다.",
+ "P-S096-D": "체육 시간에 멀리뛰기 거리를 줄자로 측정했다.",
+ "P-S096-W": "미세먼지 농도를 측정하는 기계가 곳곳에 설치되었다.",
+ "P-S097-S": "지구 내부는 지각, 맨틀, 핵으로 이루어진 층상 구조이다.",
+ "P-S097-D": "여러 겹으로 쌓인 케이크를 자르자 층상 구조가 한눈에 보였다.",
+ "P-S097-W": "지층의 층상 구조를 살펴보면 오랜 세월의 흔적을 읽을 수 있다.",
+ "P-S098-S": "근거가 주장을 뒷받침하는지 타당성을 따져 보았다.",
+ "P-S098-D": "‘다 하니까 옳다’는 말은 타당성이 부족하다고 생각했다.",
+ "P-S098-W": "새 사업의 경제적 타당성을 조사한 보고서가 발표되었다.",
+ "P-S099-S": "여러 나라가 하나로 통합되면서 제도와 문화도 바뀌었다.",
+ "P-S099-D": "동아리 두 개가 한 팀으로 통합되어 인원이 늘었다.",
+ "P-S099-W": "학교를 통합하는 일은 지역 주민의 의견을 들어 신중히 정해야 한다.",
+ "P-S100-S": "태양 에너지를 활용하면 전기를 아낄 수 있다.",
+ "P-S100-D": "쓰고 남은 종이 뒷면을 메모지로 활용했다.",
+ "P-S100-W": "버려지던 폐열을 활용해 난방하는 도시가 생겼다.",
+ "P-S101-S": "쓰고 난 용액에서 값비싼 물질을 회수하는 방법을 배웠다.",
+ "P-S101-D": "반장이 학급 과제를 회수해서 선생님께 드렸다.",
+ "P-S101-W": "결함이 있는 제품을 제조사가 회수하면 소비자의 피해를 줄일 수 있다.",
+ "P-S102-S": "가전제품의 효용성을 따져 보면 정말 필요한 물건을 고를 수 있다.",
+ "P-S102-D": "새 학습 앱이 공부에 도움이 되는지 효용성을 따져 보았다.",
+ "P-S102-W": "새 교통 시설의 효용성을 두고 주민들이 토론했다.",
+ "P-S103-S": "같은 전력으로 더 밝은 전구가 효율이 높은 제품이다.",
+ "P-S103-D": "청소 순서를 바꿨더니 효율이 높아져서 시간이 절반으로 줄었다.",
+ "P-S103-W": "효율만 따지다가 안전을 소홀히 하면 큰 사고로 이어질 수 있다."
+};

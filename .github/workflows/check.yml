@@ -1,0 +1,12 @@
+name: 저장소 점검
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 데이터 개수·복사본·개인정보 흔적 점검
+        run: python -X utf8 tests/check_repo.py

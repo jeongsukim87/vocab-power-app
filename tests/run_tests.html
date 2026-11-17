@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>자동 테스트</title>
+<style>
+  body { font: 14px/1.5 system-ui, "Malgun Gothic", sans-serif; margin: 16px; }
+  .ok { color: #0a7a3d } .bad { color: #c0262d; font-weight: 700 } h2 { margin: 18px 0 4px; font-size: 15px }
+  #sum { font-size: 18px; font-weight: 700; padding: 8px 0 }
+</style>
+</head>
+<body>
+<div id="sum">실행 중…</div>
+<div id="out"></div>
+<script src="../docs/js/sha256.js"></script>
+<script src="../docs/js/core.js"></script>
+<script src="../docs/js/memory_store.js"></script>
+<script src="../docs/js/seed_examples.js"></script>
+<script>
+/* ===== 아주 작은 테스트 틀 ===== */
+var results = [], current = '';
+function group(name) { current = name; var h = document.createElement('h2'); h.textContent = name; document.getElementById('out').appendChild(h); }
+function check(name, cond, detail) {
+  results.push({ group: current, name: name, ok: !!cond });
+  var d = document.createElement('div'); d.className = cond ? 'ok' : 'bad';
+  d.textContent = (cond ? '✔ ' : '✘ ') + name + (cond ? '' : '  → ' + (detail === undefined ? '' : (typeof detail === 'string' ? detail : JSON.stringify(detail))));
+  document.getElementById('out').appendChild(d);
+}
+function eq(name, a, b) { check(name, JSON.stringify(a) === JSON.stringify(b), '받은 값 ' + JSON.stringify(a) + ' / 기대 ' + JSON.stringify(b)); }
+function code(r) { return r.ok ? 'OK' : r.error.code; }
+
+/* ===== 테스트 환경 만들기 ===== */
+var VOCAB, CARDS;
+function randomHex(n) { var a = new Uint8Array(n), s = ''; crypto.getRandomValues(a); for (var i = 0; i < n; i++) s += ('0' + a[i].toString(16)).slice(-2); return s; }
+var clock = { t: Date.now() };
+function world() {
+  var store = MemoryStore();
+  var core = VocabCore.create({ store: store, sha256Hex: sha256Hex, randomHex: randomHex, pepper: 'test-pepper',
+    now: function () { return new Date(clock.t).toISOString(); }, lock: function (fn) { return fn(); } });
+  store.ensure(); core.seed(VOCAB, SEED_EXAMPLES);
+  var w = { store: store, core: core };
+  w.call = function (token, action, payload, rid) { return core.handle({ action: action, token: token, payload: payload || {}, req_id: rid }); };
+  w.must = function (token, action, payload, rid) { var r = w.call(token, action, payload, rid); if (!r.ok) throw new Error(action + ' 실패: ' + r.error.code + ' ' + r.error.message); return r.data; };
+  var t = core.createTeacher('t1', '선생님');
+  w.teacher = w.must('', 'auth.activate', { login_id: 't1', invite_code: t.invite_code, new_password: 'teacher-pass-1' });
+  w.T = w.teacher.token;
+  w.cls = w.must(w.T, 'class.create', { school_year: 2027, grade: 2, class_name: '3반' });
+  var made = w.must(w.T, 'student.create', { class_id: w.cls.class_id, students: [{ no: 1, name: '가학생' }, { no: 2, name: '나학생' }, { no: 3, name: '다학생' }] });
+  w.stu = made.map(function (m) { var s = w.must('', 'auth.activate', { login_id: m.login_id, invite_code: m.invite_code, new_password: 'pw-' + m.login_id }); return { token: s.token, user: s.user, login_id: m.login_id, pw: 'pw-' + m.login_id, made: m }; });
+  w.A = w.stu[0].token; w.B = w.stu[1].token;
+  return w;
+}
+function vid(headword, origin) { return VOCAB.vocabulary.filter(function (v) { return v.headword === headword && (!origin || v.origin === origin); })[0].vocabulary_id; }
+
+/* ===== 테스트 본문 ===== */
+async function main() {
+  VOCAB = await (await fetch('../docs/data/vocab.json')).json();
+  CARDS = await (await fetch('../docs/data/cards.json')).json();
+
+  group('0. 해시 함수');
+  var enc = async function (s) { var b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); return Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); };
+  var samples = ['abc', '', '가나다 라마바', '이모지😀섞임', 'x'.repeat(200)];
+  for (var i = 0; i < samples.length; i++) check('SHA-256 이 브라우저 표준 구현과 같다: ' + JSON.stringify(samples[i].slice(0, 10)), sha256Hex(samples[i]) === await enc(samples[i]));
+
+  group('9. 학교 원본 104개 항목과 정리본 고유 어휘 대응 (누락 없음)');
+  var school = VOCAB.vocabulary.filter(function (v) { return v.origin === 'SCHOOL'; });
+  var schoolSrc = VOCAB.sources.filter(function (s) { return s.source_type === 'SCHOOL'; });
+  eq('정리본 고유 표제어 103개', school.length, 103);
+  eq('원본 항목(출처 행) 104개', schoolSrc.length, 104);
+  check('모든 학교 어휘에 출처가 1개 이상', school.every(function (v) { return schoolSrc.some(function (s) { return s.vocabulary_id === v.vocabulary_id; }); }));
+  check('주체: 교과서 쪽수 두 곳이 모두 보존됨', schoolSrc.filter(function (s) { return s.vocabulary_id === vid('주체', 'SCHOOL'); }).map(function (s) { return s.page; }).sort().join() === '49쪽,66쪽');
+  check('쪽수 «미기재» 는 지어내지 않고 그대로 보존됨', schoolSrc.filter(function (s) { return s.page === '미기재'; }).length === 19);
+  check('뜻풀이 초안은 «검토 필요» 상태', school.every(function (v) { return v.definition_status === 'DRAFT_REVIEW'; }));
+  check('학교 어휘마다 세 장면 상황이 모두 있고 서로 다르다', school.every(function (v) { var p = VOCAB.prompts.filter(function (x) { return x.vocabulary_id === v.vocabulary_id; }); return p.length === 3 && new Set(p.map(function (x) { return x.scenario; })).size === 3 && p.every(function (x) { return x.guiding_question.length > 5; }); }));
+  check('세 장면 상황 309개 중 같은 문장이 없다', new Set(VOCAB.prompts.map(function (x) { return x.scenario; })).size === 309);
+
+  group('10. 국가 사고도구어 307개 검색·조회');
+  var nat = VOCAB.vocabulary.filter(function (v) { return v.origin === 'NATIONAL'; });
+  eq('국가 어휘 307개', nat.length, 307);
+  eq('카드 307장', Object.keys(CARDS).length, 307);
+  check('표제어 중복 없음', new Set(nat.map(function (v) { return v.normalized_headword; })).size === 307);
+  check('카드마다 확인 문장·짐작 단서 3개·뜻풀이·예문·확장 항목 3개', nat.every(function (v) { var c = CARDS[v.vocabulary_id]; return c && c.confirm.text.length > 5 && c.guess.length === 3 && c.understand.definition && c.understand.example && c.expand.items.length === 3; }));
+  check('검색: «구상하다» 를 찾는다', nat.some(function (v) { return v.headword === '구상하다'; }));
+  check('국가 어휘 출처는 «이용 허락 미확인» 으로 표시된다', VOCAB.sources.filter(function (s) { return s.source_type === 'NATIONAL'; }).every(function (s) { return s.permission_status === 'UNVERIFIED'; }));
+
+  group('5. 학교·국가 공통 어휘');
+  var same = VOCAB.relations.filter(function (r) { return r.relation_type === 'SAME_HEADWORD'; });
+  eq('표제어가 같은 어휘 9개가 연결됨', same.length, 9);
+  check('연결은 «후보» 상태로만 되어 있다 (뜻이 같은지 자동 병합하지 않음)', same.every(function (r) { return r.status === 'CANDIDATE'; }));
+  var bs = ['V-S034'].concat(nat.filter(function (v) { return v.headword === '보편적'; }).map(function (v) { return v.vocabulary_id; }));
+  check('보편적: 학교·국가 두 출처가 모두 있다', vid('보편적', 'SCHOOL') && vid('보편적', 'NATIONAL') && VOCAB.sources.filter(function (s) { return s.vocabulary_id === vid('보편적', 'SCHOOL') || s.vocabulary_id === vid('보편적', 'NATIONAL'); }).map(function (s) { return s.source_type; }).sort().join() === 'NATIONAL,SCHOOL');
+  check('학교 «보편적» 과 국가 «보편적» 은 다른 vocabulary_id 로 따로 보존된다', vid('보편적', 'SCHOOL') !== vid('보편적', 'NATIONAL'));
+
+  group('12. 로그인하지 않으면 접근 불가');
+  var w = world();
+  eq('토큰 없이 내 기록 요청', code(w.call('', 'sync')), 'UNAUTHENTICATED');
+  eq('엉터리 토큰', code(w.call('x'.repeat(48), 'sync')), 'UNAUTHENTICATED');
+  eq('토큰 없이 교사 기능(학생 목록)', code(w.call('', 'student.list', { class_id: w.cls.class_id })), 'UNAUTHENTICATED');
+  eq('학생 토큰으로 교사 기능', code(w.call(w.A, 'student.list', { class_id: w.cls.class_id })), 'FORBIDDEN');
+  eq('학생 토큰으로 학생 만들기', code(w.call(w.A, 'student.create', { class_id: w.cls.class_id, students: [{ no: 9, name: 'x' }] })), 'FORBIDDEN');
+  eq('교사 토큰으로 학생 화면 기능', code(w.call(w.T, 'sync')), 'FORBIDDEN');
+  eq('알 수 없는 요청', code(w.call(w.A, 'drop.table')), 'NOT_FOUND');
+  eq('로그아웃하면 토큰이 죽는다', (function () { var s = w.must('', 'auth.login', { login_id: w.stu[2].login_id, password: w.stu[2].pw }); w.must(s.token, 'auth.logout'); return code(w.call(s.token, 'sync')); })(), 'UNAUTHENTICATED');
+  eq('세션 만료', (function () { var s = w.must('', 'auth.login', { login_id: w.stu[2].login_id, password: w.stu[2].pw }); clock.t += 9 * 3600e3; var r = code(w.call(s.token, 'sync')); clock.t -= 9 * 3600e3; return r; })(), 'SESSION_EXPIRED');
+  eq('같은 아이디의 다른 사람 토큰으로는 안 된다(토큰 해시 저장)', w.store.all('Sessions').every(function (s) { return s.token_hash !== w.A && s.token_hash.length === 64; }), true);
+
+  group('인증·비밀번호');
+  w = world();
+  check('비밀번호가 평문으로 저장되지 않는다', w.store.all('Users').every(function (u) { return u.credential_hash.length === 64 && u.credential_hash.indexOf('pw-') < 0; }));
+  check('초대 코드도 해시로만 남고 사용 후 지워진다', w.store.all('Users').every(function (u) { return u.invite_hash === ''; }));
+  eq('틀린 비밀번호', code(w.call('', 'auth.login', { login_id: w.stu[0].login_id, password: 'nope-nope' })), 'LOGIN_FAILED');
+  eq('없는 아이디도 같은 메시지', w.call('', 'auth.login', { login_id: 'ghost', password: 'nope-nope' }).error.message, w.call('', 'auth.login', { login_id: w.stu[0].login_id, password: 'nope-nope' }).error.message);
+  for (var k = 0; k < 5; k++) w.call('', 'auth.login', { login_id: w.stu[1].login_id, password: 'bad' + k });
+  eq('5번 틀리면 그다음부터 잠긴다', code(w.call('', 'auth.login', { login_id: w.stu[1].login_id, password: 'bad-6' })), 'LOCKED');
+  eq('잠긴 동안은 맞는 비밀번호도 막힌다', code(w.call('', 'auth.login', { login_id: w.stu[1].login_id, password: w.stu[1].pw })), 'LOCKED');
+  clock.t += 11 * 60e3;
+  eq('10분 뒤에는 다시 로그인된다', code(w.call('', 'auth.login', { login_id: w.stu[1].login_id, password: w.stu[1].pw })), 'OK');
+  eq('약한 비밀번호(너무 짧음)는 거절', (function () { var m = w.must(w.T, 'student.create', { class_id: w.cls.class_id, students: [{ no: 20, name: '새학생' }] })[0]; return code(w.call('', 'auth.activate', { login_id: m.login_id, invite_code: m.invite_code, new_password: '123' })); })(), 'WEAK_PASSWORD');
+  eq('틀린 초대 코드', (function () { var m = w.must(w.T, 'student.create', { class_id: w.cls.class_id, students: [{ no: 21, name: '새학생2' }] })[0]; return code(w.call('', 'auth.activate', { login_id: m.login_id, invite_code: 'AAAA-AAAA', new_password: 'goodpass1' })); })(), 'INVITE_INVALID');
+  eq('초대 코드는 한 번만 쓸 수 있다', (function () { var m = w.must(w.T, 'student.create', { class_id: w.cls.class_id, students: [{ no: 22, name: '새학생3' }] })[0]; w.must('', 'auth.activate', { login_id: m.login_id, invite_code: m.invite_code, new_password: 'goodpass1' }); return code(w.call('', 'auth.activate', { login_id: m.login_id, invite_code: m.invite_code, new_password: 'otherpass1' })); })(), 'INVITE_INVALID');
+  eq('비밀번호 변경 뒤 옛 비밀번호는 안 된다', (function () { var s = w.must('', 'auth.login', { login_id: w.stu[2].login_id, password: w.stu[2].pw }); w.must(s.token, 'auth.change_password', { old_password: w.stu[2].pw, new_password: 'brand-new-pw' }); return code(w.call('', 'auth.login', { login_id: w.stu[2].login_id, password: w.stu[2].pw })) + '/' + code(w.call('', 'auth.login', { login_id: w.stu[2].login_id, password: 'brand-new-pw' })); })(), 'LOGIN_FAILED/OK');
+  eq('계정 복구: 교사가 새 코드를 주면 기존 로그인이 끊긴다', (function () { var s = w.must('', 'auth.login', { login_id: w.stu[0].login_id, password: w.stu[0].pw }); var r = w.must(w.T, 'student.reset', { user_id: w.stu[0].user.user_id }); var a = code(w.call(s.token, 'sync')); w.must('', 'auth.activate', { login_id: w.stu[0].login_id, invite_code: r.invite_code, new_password: 'recovered-pw' }); return a + '/' + code(w.call('', 'auth.login', { login_id: w.stu[0].login_id, password: 'recovered-pw' })); })(), 'UNAUTHENTICATED/OK');
+
+  group('1. 학생 A 의 기록을 학생 B 가 조회·수정할 수 없다');
+  w = world();
+  var V = vid('맥락', 'SCHOOL');
+  var wa = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '국어 시간에 맥락을 살펴 글을 읽었다.', mode: 'SUBMIT' });
+  var ca = w.must(w.A, 'collection.add', { headword: '나만의단어', confirmed_meaning: '내가 아는 뜻' }).item;
+  var da = w.must(w.A, 'daily.save', { date: '2027-03-02', text: '오늘의 문장입니다 정말로.' });
+  eq('B 의 sync 에는 A 의 문장이 없다', w.must(w.B, 'sync').writings.length, 0);
+  eq('B 가 A 문장의 수정 이력을 요청', code(w.call(w.B, 'writing.revisions', { writing_id: wa.writing_id })), 'NOT_FOUND');
+  eq('B 가 A 문장의 예시 열람 표시를 변경', code(w.call(w.B, 'writing.mark_example', { writing_id: wa.writing_id })), 'NOT_FOUND');
+  eq('B 가 A 의 수집 단어를 수정', code(w.call(w.B, 'collection.save', { collection_id: ca.collection_id, confirmed_meaning: '해킹' })), 'NOT_FOUND');
+  eq('B 가 A 의 수집 단어를 지움', code(w.call(w.B, 'collection.trash', { collection_id: ca.collection_id })), 'NOT_FOUND');
+  eq('B 가 A 의 수집 단어를 공유 신청', code(w.call(w.B, 'collection.request_share', { collection_id: ca.collection_id })), 'NOT_FOUND');
+  eq('B 가 A 의 오늘의 문장을 고침', code(w.call(w.B, 'daily.save', { daily_id: da.daily_id, date: '2027-03-02', text: '해킹한 문장입니다 정말로.' })), 'NOT_FOUND');
+  eq('B 가 A 의 오늘의 문장을 지움', code(w.call(w.B, 'daily.delete', { daily_id: da.daily_id })), 'NOT_FOUND');
+  eq('B 가 같은 어휘·장면에 쓰면 B 자신의 기록이 따로 생긴다', (function () { var wb = w.must(w.B, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: 'B 의 문장이다 맥락을.', mode: 'SUBMIT' }); return wb.writing_id !== wa.writing_id && wb.user_id !== wa.user_id; })(), true);
+  eq('A 의 문장은 그대로다', w.must(w.A, 'sync').writings[0].text, '국어 시간에 맥락을 살펴 글을 읽었다.');
+  eq('B 가 A 의 피드백을 «읽음» 처리', (function () { var f = w.must(w.T, 'feedback.save', { target_id: wa.writing_id, comment: '잘 썼어요' }); return code(w.call(w.B, 'feedback.read', { feedback_id: f.feedback_id })); })(), 'NOT_FOUND');
+  eq('B 의 동기화에 A 의 피드백은 없다', w.must(w.B, 'sync').feedback.length, 0);
+  check('B 가 A 의 수집 단어 목록을 볼 수 없다', w.must(w.B, 'sync').collections.length === 0);
+  eq('B 가 다른 사람 수집 단어를 자기 어휘로 지정해 글을 쓰려 해도 막힌다', code(w.call(w.B, 'writing.save', { vocabulary_id: ca.collection_id, scene_type: 'DAILY', text: '남의 단어로 쓰는 문장.', mode: 'SUBMIT' })), 'NOT_FOUND');
+
+  group('2. 다른 기기로 접속해도 본인 기록이 유지된다');
+  w = world();
+  w.must(w.A, 'sv.save', { vocabulary_id: V, guessed_meaning: '앞뒤 흐름', mark: ['define'] });
+  var dev2 = w.must('', 'auth.login', { login_id: w.stu[0].login_id, password: w.stu[0].pw });
+  var snap = w.must(dev2.token, 'sync');
+  check('새 기기에서 로그인해도 같은 학습 기록이 보인다', snap.sv.length === 1 && snap.sv[0].guessed_meaning === '앞뒤 흐름' && snap.sv[0].steps.define === true);
+  check('두 기기의 토큰은 서로 다르다', dev2.token !== w.A);
+
+  group('3. 세 장면 중 일부만 써도 임시 저장·복원');
+  w = world();
+  var d1 = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '쓰다 만 문장', mode: 'DRAFT' });
+  check('임시 저장은 제출 횟수를 올리지 않는다', d1.status === 'DRAFT' && d1.version === 0 && d1.text === '');
+  w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'DAILY', text: '', mode: 'DRAFT' });
+  var snap3 = w.must('', 'auth.login', { login_id: w.stu[0].login_id, password: w.stu[0].pw });
+  var ws3 = w.must(snap3.token, 'sync').writings;
+  check('다른 기기에서 복원하면 교과 장면 초안이 그대로 나온다', ws3.some(function (x) { return x.scene_type === 'SUBJECT' && x.draft_text === '쓰다 만 문장'; }));
+  check('세 장면은 따로 저장된다', ws3.length === 2);
+  eq('초안만으로는 어휘가 «완료» 되지 않는다', VocabCore.util.vocabStatus('SCHOOL', w.must(w.A, 'sync').sv[0], ws3).done, false);
+  eq('너무 짧은 문장은 제출되지 않는다', code(w.call(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'WORLD', text: '네', mode: 'SUBMIT' })), 'TOO_SHORT');
+
+  group('4. 수정한 문장과 이전 버전이 구분되어 보존된다');
+  w = world();
+  var s1 = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '첫 번째 제출 문장입니다.', mode: 'SUBMIT' });
+  eq('첫 제출은 버전 1', s1.version, 1);
+  var dr = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '고치는 중인 문장입니다.', mode: 'DRAFT', base_rev: s1.rev });
+  check('제출 뒤 고치는 중이면 «고치는 중» 이고 제출본은 그대로', dr.status === 'REVISING' && dr.text === '첫 번째 제출 문장입니다.' && dr.draft_text === '고치는 중인 문장입니다.');
+  eq('고친 곳이 없으면 다시 제출 불가', code(w.call(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '첫 번째 제출 문장입니다.', mode: 'SUBMIT', base_rev: dr.rev })), 'UNCHANGED');
+  var s2 = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '두 번째로 고쳐 제출한 문장입니다.', mode: 'SUBMIT', base_rev: dr.rev });
+  var revs = w.must(w.A, 'writing.revisions', { writing_id: s1.writing_id });
+  check('버전 2 로 올라가고 이전 버전이 따로 남는다', s2.version === 2 && revs.length === 2 && revs[0].text === '첫 번째 제출 문장입니다.' && revs[1].text === '두 번째로 고쳐 제출한 문장입니다.');
+  check('교사도 수정 이력을 볼 수 있다', w.must(w.T, 'student.detail', { user_id: w.stu[0].user.user_id }).revisions.length === 2);
+
+  group('11. 동시 저장 시 덮어쓰기·유실 방지');
+  w = world();
+  var base = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'DAILY', text: '기기 하나에서 시작했다.', mode: 'DRAFT' });
+  var devB = w.must('', 'auth.login', { login_id: w.stu[0].login_id, password: w.stu[0].pw }).token;
+  w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'DAILY', text: '기기 하나에서 먼저 고쳤다.', mode: 'DRAFT', base_rev: base.rev });
+  var conflict = w.call(devB, 'writing.save', { vocabulary_id: V, scene_type: 'DAILY', text: '오래된 화면에서 덮어쓰려 한다.', mode: 'DRAFT', base_rev: base.rev });
+  check('낡은 화면에서 저장하면 충돌로 알려 주고 덮어쓰지 않는다', code(conflict) === 'CONFLICT' && conflict.error.data.draft_text === '기기 하나에서 먼저 고쳤다.');
+  eq('서버에는 먼저 저장한 내용이 남아 있다', w.must(w.A, 'sync').writings[0].draft_text, '기기 하나에서 먼저 고쳤다.');
+  var r1 = w.call(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '중복 요청 시험 문장입니다.', mode: 'SUBMIT' }, 'req-1');
+  var r2 = w.call(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '중복 요청 시험 문장입니다.', mode: 'SUBMIT' }, 'req-1');
+  check('같은 요청이 두 번 와도(더블클릭·재전송) 한 번만 반영된다', r1.ok && r2.ok && r1.data.writing_id === r2.data.writing_id && r2.data.version === 1 && w.store.all('WritingRevisions').filter(function (x) { return x.text === '중복 요청 시험 문장입니다.'; }).length === 1);
+  check('다른 사람의 req_id 를 가져다 써도 응답을 받지 못한다', (function () { var r = w.call(w.B, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '남의 요청 번호를 써 본다 문장.', mode: 'SUBMIT' }, 'req-1'); return r.ok && r.data.user_id === w.stu[1].user.user_id; })());
+  var sv1 = w.must(w.A, 'sv.save', { vocabulary_id: V, guessed_meaning: '첫 짐작' });
+  eq('학습 기록도 낡은 base_rev 는 충돌', code(w.call(w.A, 'sv.save', { vocabulary_id: V, guessed_meaning: '덮어쓰기', base_rev: sv1.rev - 1 })), 'CONFLICT');
+  check('초대 코드·토큰이 든 응답은 중복 방지 기록에 남지 않는다', w.store.all('ReqLog').every(function (x) { return x.response.indexOf('invite_code') < 0 && x.response.indexOf('token') < 0; }));
+
+  group('6. 개인 단어장: 중복 안내 + 새 발견 맥락 보존');
+  w = world();
+  var dup = w.must(w.A, 'collection.add', { headword: '맥락', source_context: '과학 기사에서 봤다' });
+  check('공용 사전에 있는 단어는 저장 전에 안내한다', dup.duplicate === true && dup.dictionary.length >= 1 && dup.dictionary[0].origin === 'SCHOOL');
+  eq('안내 단계에서는 저장되지 않는다', w.must(w.A, 'sync').collections.length, 0);
+  var sv = w.must(w.A, 'collection.add', { headword: '맥락', source_context: '과학 기사에서 봤다', guessed_meaning: '흐름', confirm_duplicate: true, personal_note: 'x' });
+  check('«새 문맥으로 따로 저장» 하면 저장된다', sv.duplicate === false && sv.item.source_context === '과학 기사에서 봤다' && sv.item.vocabulary_id === vid('맥락', 'SCHOOL'));
+  var again = w.must(w.A, 'collection.add', { headword: ' 맥 락 ', source_context: '영상에서 또 봤다', confirm_duplicate: true });
+  check('같은 단어를 다른 문맥으로 또 저장해도 둘 다 남는다', again.item.duplicate_of === sv.item.collection_id && w.must(w.A, 'sync').collections.length === 2);
+  var own = w.must(w.A, 'collection.add', { headword: '내가찾은말' });
+  var own2 = w.must(w.A, 'collection.add', { headword: '내가찾은말', source_context: '다른 책' });
+  check('내 수집함에 이미 있는 단어는 안내한다', own.duplicate === false && own2.duplicate === true && own2.mine.length === 1);
+  var trashed = w.must(w.A, 'collection.trash', { collection_id: own.item.collection_id });
+  check('지운 단어는 휴지통 상태로 남아 복구된다', trashed.status === 'TRASHED' && w.must(w.A, 'collection.trash', { collection_id: own.item.collection_id, restore: true }).status === 'ACTIVE');
+  eq('수집 단어로도 세 장면 작문을 쓸 수 있다', code(w.call(w.A, 'writing.save', { vocabulary_id: own.item.collection_id, scene_type: 'DAILY', text: '내가 찾은 낱말로 쓴 문장입니다.', mode: 'SUBMIT' })), 'OK');
+  var shared = w.must(w.A, 'collection.save', { collection_id: sv.item.collection_id, confirmed_meaning: '글의 앞뒤 흐름', base_rev: sv.item.rev });
+  w.must(w.A, 'collection.request_share', { collection_id: sv.item.collection_id });
+  eq('교사 승인 전에는 학급에 공유되지 않는다', w.must(w.B, 'sync').shared.length, 0);
+  eq('교사가 검토할 목록에 올라온다', w.must(w.T, 'review.pending', { class_id: w.cls.class_id }).length, 1);
+  w.must(w.T, 'collection.review', { collection_id: sv.item.collection_id, decision: 'APPROVED', note: '좋아요' });
+  eq('승인하면 학급 친구에게 보인다', w.must(w.B, 'sync').shared.map(function (x) { return x.headword; }), ['맥락']);
+
+  group('7. 교사가 지정한 과제가 학생 화면에 정확히 반영된다');
+  w = world();
+  var ids = ['보편적', '맥락', '추론'].map(function (h) { return vid(h, 'SCHOOL'); });
+  w.must(w.T, 'lesson.set_vocab', { class_id: w.cls.class_id, lesson_number: 3, items: [{ vocabulary_id: ids[0], required: true }, { vocabulary_id: ids[1], required: false }, { vocabulary_id: vid('보편적', 'NATIONAL'), required: true }] });
+  eq('공개하기 전에는 학생에게 보이지 않는다', w.must(w.A, 'sync').lessons.length, 0);
+  w.must(w.T, 'lesson.save', { class_id: w.cls.class_id, lesson_number: 3, published: true, title: '3차시: 관점', goals: '목표 글' });
+  var ls = w.must(w.A, 'sync').lessons;
+  check('공개하면 정확히 지정한 어휘와 필수 여부가 보인다', ls.length === 1 && ls[0].title === '3차시: 관점' && ls[0].vocab.length === 3 && ls[0].vocab[1].required === 0 && ls[0].vocab[2].vocabulary_id === vid('보편적', 'NATIONAL'));
+  w.must(w.T, 'lesson.save', { class_id: w.cls.class_id, lesson_number: 3, published: false });
+  eq('다시 숨기면 사라진다', w.must(w.A, 'sync').lessons.length, 0);
+  eq('없는 어휘는 지정할 수 없다', code(w.call(w.T, 'lesson.set_vocab', { class_id: w.cls.class_id, lesson_number: 3, items: [{ vocabulary_id: 'V-없음' }] })), 'NOT_FOUND');
+  var dist = w.must(w.T, 'lesson.auto_distribute', { class_id: w.cls.class_id });
+  var all = dist.reduce(function (n, l) { return n + l.vocab.length; }, 0);
+  check('자동 나누기: 학교 어휘 103개가 34개 차시에 빠짐없이 한 번씩 들어간다', dist.length === 34 && all === 103 && new Set([].concat.apply([], dist.map(function (l) { return l.vocab.map(function (v) { return v.vocabulary_id; }); }))).size === 103);
+  var w2 = world(); /* 다른 교사 */
+  eq('다른 교사는 이 학급 과제를 바꿀 수 없다', (function () { var o = w2.core.createTeacher('t2', '다른 선생님'); var s = w2.must('', 'auth.activate', { login_id: 't2', invite_code: o.invite_code, new_password: 'teacher-pass-2' }); return code(w2.call(s.token, 'lesson.set_vocab', { class_id: w2.cls.class_id, lesson_number: 1, items: [] })); })(), 'FORBIDDEN');
+
+  group('8. 피드백은 해당 학생과 권한 있는 교사만 조회');
+  w = world();
+  var o2 = w.core.createTeacher('t2', '다른 선생님'); var T2 = w.must('', 'auth.activate', { login_id: 't2', invite_code: o2.invite_code, new_password: 'teacher-pass-2' }).token;
+  var wr = w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'WORLD', text: '뉴스에서 맥락을 잘라 쓰면 오해가 생긴다.', mode: 'SUBMIT' });
+  var fb = w.must(w.T, 'feedback.save', { target_id: wr.writing_id, comment: '맥락 활용이 좋아요', rubric: { accuracy: 4, context: 3, clarity: 3, own_thought: 4, transfer: 2 } });
+  check('피드백이 5개 준거와 함께 저장된다', fb.rubric.accuracy === 4 && fb.rubric.transfer === 2 && fb.comment === '맥락 활용이 좋아요');
+  eq('해당 학생에게는 보인다', w.must(w.A, 'sync').feedback.map(function (f) { return f.comment; }), ['맥락 활용이 좋아요']);
+  eq('다른 학생에게는 보이지 않는다', w.must(w.B, 'sync').feedback.length, 0);
+  eq('다른 학급 교사는 이 학생의 피드백을 달 수 없다', code(w.call(T2, 'feedback.save', { target_id: wr.writing_id, comment: '침입' })), 'FORBIDDEN');
+  eq('다른 교사는 이 학생의 기록을 볼 수 없다', code(w.call(T2, 'student.detail', { user_id: w.stu[0].user.user_id })), 'FORBIDDEN');
+  eq('다른 교사는 이 학급의 통계를 볼 수 없다', code(w.call(T2, 'stats.class', { class_id: w.cls.class_id })), 'FORBIDDEN');
+  eq('다른 교사는 내보내기를 할 수 없다', code(w.call(T2, 'export.class', { class_id: w.cls.class_id, kind: 'writings' })), 'FORBIDDEN');
+  eq('피드백을 고치면 같은 건이 갱신된다(중복 없음)', (function () { w.must(w.T, 'feedback.save', { target_id: wr.writing_id, comment: '다시 읽어 보니 더 좋아요' }); return w.store.all('TeacherFeedback').length; })(), 1);
+  check('학생이 읽으면 읽음 표시가 남는다', (function () { var f = w.must(w.A, 'sync').feedback[0]; w.must(w.A, 'feedback.read', { feedback_id: f.feedback_id }); return !!w.store.get('TeacherFeedback', f.feedback_id).read_at; })());
+
+  group('예시 문장은 먼저 쓴 뒤에만 열람');
+  w = world();
+  eq('쓰기 전에는 예시를 볼 수 없다', code(w.call(w.A, 'writing.example', { vocabulary_id: V, scene_type: 'SUBJECT' })), 'WRITE_FIRST');
+  w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '내가 먼저 쓴 문장입니다.', mode: 'DRAFT' });
+  check('쓴 뒤에는 예시가 내려온다', w.must(w.A, 'writing.example', { vocabulary_id: V, scene_type: 'SUBJECT' }).example.length > 10);
+  check('동기화 응답에는 예시가 들어 있지 않다', JSON.stringify(w.must(w.B, 'sync').delta).indexOf('"example"') < 0);
+
+  group('학습 완료 기준 (일부 선택만으로 완료 처리하지 않는다)');
+  w = world();
+  var scenes = ['SUBJECT', 'DAILY', 'WORLD'];
+  function wr3(n) { for (var i = 0; i < n; i++) w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: scenes[i], text: '문장 번호 ' + i + ' 맥락을 넣은 문장.', mode: 'SUBMIT' }); }
+  wr3(3);
+  var svx = w.must(w.A, 'sync'); var st = VocabCore.util.vocabStatus('SCHOOL', svx.sv[0], svx.writings);
+  check('세 장면만 제출해서는 완료가 아니다 (뜻 확인·자기 설명 등이 비어 있음)', st.done === false && st.got === 3 && st.total === 8);
+  check('문장 수만으로 «능동 어휘» 로 판정하지 않는다', st.level.write === true && st.level.transfer === true && st.level.active === false);
+  w.must(w.A, 'sv.save', { vocabulary_id: V, textbook_sentence: '교과서에 나온 문장이다.', guessed_meaning: '글의 앞뒤', self_explanation: '글의 앞뒤 흐름으로 뜻이 정해지는 것', mark: ['define', 'related'] });
+  svx = w.must(w.A, 'sync'); st = VocabCore.util.vocabStatus('SCHOOL', svx.sv[0], svx.writings);
+  check('모든 조건을 채우면 완료·능동 어휘', st.done && st.level.active);
+  eq('글자 수가 모자란 자기 설명은 단계로 인정하지 않는다', (function () { var x = w.must(w.A, 'sv.save', { vocabulary_id: vid('추론', 'SCHOOL'), self_explanation: '짧음' }); return x.steps.explain; })(), false);
+  eq('국가 어휘는 문장 1개 + 확인·짐작·이해·확장이면 완료', (function () { var N = vid('구상하다', 'NATIONAL'); w.must(w.A, 'sv.save', { vocabulary_id: N, guessed_meaning: '떠올리다', mark: ['confirm', 'define', 'related'] }); w.must(w.A, 'writing.save', { vocabulary_id: N, scene_type: 'DAILY', text: '축제를 구상하는 학생회 문장.', mode: 'SUBMIT' }); var s = w.must(w.A, 'sync'); return VocabCore.util.vocabStatus('NATIONAL', s.sv.filter(function (x) { return x.vocabulary_id === N; })[0], s.writings.filter(function (x) { return x.vocabulary_id === N; })).done; })(), true);
+  w.must(w.A, 'review.record', { vocabulary_id: V, mode: 'recall', result: 'WRONG' });
+  eq('복습에서 틀리면 1단계로 돌아가 내일 다시 나온다', (function () { var x = w.must(w.A, 'sync').sv.filter(function (s) { return s.vocabulary_id === V; })[0]; return x.box + ':' + (new Date(x.next_review_at) - clock.t < 2 * 864e5); })(), '1:true');
+
+  group('교사 도구');
+  w = world();
+  w.must(w.A, 'writing.save', { vocabulary_id: V, scene_type: 'SUBJECT', text: '=HYPERLINK("http://나쁜곳") 수식 시도 문장입니다', mode: 'SUBMIT' });
+  var ex = w.must(w.T, 'export.class', { class_id: w.cls.class_id, kind: 'writings' });
+  check('내보내기: 수식으로 읽힐 글자로 시작하는 칸은 막는다', ex.rows[1][4].charAt(0) === "'" || ex.rows[1][4].charAt(0) !== '=', ex.rows[1][4]);
+  var stats = w.must(w.T, 'stats.class', { class_id: w.cls.class_id });
+  eq('통계에 학생 3명', stats.students.length, 3);
+  var bk = w.must(w.T, 'backup.export', {});
+  check('백업에 학생·문장·이력이 들어 있다', bk.data.Users.length === 3 && bk.data.Writings.length === 1 && bk.data.WritingRevisions.length === 1);
+  w.must(w.T, 'student.purge', { user_id: w.stu[0].user.user_id, confirm: w.stu[0].login_id });
+  check('학생 삭제: 계정과 모든 기록이 지워진다', !w.store.get('Users', w.stu[0].user.user_id) && w.store.all('Writings').length === 0 && w.store.all('WritingRevisions').length === 0);
+  eq('삭제 확인 없이는 지워지지 않는다', code(w.call(w.T, 'student.purge', { user_id: w.stu[1].user.user_id, confirm: '다른아이디' })), 'CONFIRM_REQUIRED');
+  var rs = w.must(w.T, 'backup.restore', { backup: bk });
+  check('백업 복원: 지운 학생과 기록이 되돌아온다', rs.restored > 0 && !!w.store.get('Users', w.stu[0].user.user_id) && w.store.all('Writings').length === 1);
+  eq('복원 뒤 같은 비밀번호로 로그인된다', code(w.call('', 'auth.login', { login_id: w.stu[0].login_id, password: w.stu[0].pw })), 'OK');
+  eq('다른 선생님의 백업 파일은 복원되지 않는다', (function () { var b2 = JSON.parse(JSON.stringify(bk)); b2.teacher_id = 'U-other'; return code(w.call(w.T, 'backup.restore', { backup: b2 })); })(), 'BAD_REQUEST');
+  check('접근 기록(감사 로그)이 남는다', w.must(w.T, 'audit.list').some(function (l) { return l.action === 'view_student' || l.action === 'export_writings'; }));
+  eq('어휘 뜻풀이를 고치면 «교사 검토» 상태가 된다', w.must(w.T, 'vocab.save', { vocabulary_id: V, definition: '고친 뜻풀이' }).definition_status, 'TEACHER_REVIEWED');
+  check('고친 어휘는 학생의 동기화 변경분에 실린다', w.must(w.B, 'sync').delta.vocabulary.some(function (v) { return v.vocabulary_id === V && v.definition === '고친 뜻풀이'; }));
+  eq('교사가 새 어휘를 추가', w.must(w.T, 'vocab.save', { headword: '새로운말', definition: '뜻', subject: '국어' }).origin, 'CUSTOM');
+
+  /* ===== 결과 ===== */
+  var bad = results.filter(function (r) { return !r.ok; });
+  var sum = document.getElementById('sum');
+  sum.textContent = (bad.length ? '✘ 실패 ' + bad.length + '건 / ' : '✔ 모두 통과 · ') + '검사 ' + results.length + '개';
+  sum.className = bad.length ? 'bad' : 'ok';
+  window.__done = { total: results.length, failed: bad.length };
+}
+main().catch(function (e) { document.getElementById('sum').textContent = '테스트 실행 오류: ' + e.message; document.getElementById('sum').className = 'bad'; console.error(e); window.__done = { error: String(e.stack || e) }; });
+</script>
+</body>
+</html>
