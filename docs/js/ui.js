@@ -78,6 +78,23 @@ var UI = (function () {
     return U.raw(t);
   };
 
+
+  /* ---- 앱 타이틀 이미지 ----
+   * 기본 이미지: img/title.png (원본 그대로, 무손실) + img/title.webp (같은 화소를 더 작게 담은 사본)
+   * 교사가 올린 이미지가 있으면 그것(데이터 주소)을 대신 쓴다. 비율은 CSS 로만 맞추고 이미지는 변형하지 않는다. */
+  U.title = { custom: '' };
+  U.titleImg = function (cls) {
+    var alt = '힘이 되는 학습도구어';
+    if (U.title.custom) return U.raw('<picture class="title-pic" data-tcls="' + U.esc(cls || '') + '"><img class="title-img ' + U.esc(cls || '') + '" src="' + U.esc(U.title.custom) + '" alt="' + alt + '"></picture>');
+    return U.raw('<picture class="title-pic" data-tcls="' + U.esc(cls || '') + '"><source srcset="img/title.webp" type="image/webp"><img class="title-img ' + U.esc(cls || '') + '" src="img/title.png" width="2048" height="682" alt="' + alt + '"></picture>');
+  };
+  /** 화면에 이미 그려진 타이틀 이미지를 모두 바꾼다 (교사가 이미지를 바꿨을 때·시작할 때) */
+  U.setTitle = function (dataUrl) {
+    U.title.custom = dataUrl || '';
+    $$('picture.title-pic').forEach(function (p) { p.outerHTML = U.titleImg(p.dataset.tcls).s; });
+    $$('[data-title-slot=brand]').forEach(function (s) { if (!s.firstChild) s.innerHTML = U.titleImg('brand-title').s; });
+  };
+
   U.errMsg = function (e) { return e && e.message ? e.message : '문제가 생겼습니다. 잠시 뒤에 다시 해 보세요.'; };
 
   /** 저장 상태 표시기: ok · busy · err */

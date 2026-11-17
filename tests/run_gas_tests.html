@@ -147,6 +147,13 @@ async function main() {
   eq('doPost 는 이상한 본문에도 서버 오류 대신 안전한 응답을 낸다', JSON.parse(doPost({ postData: { contents: '{깨진 JSON' } }).getContent()).ok, false);
   eq('doGet 은 데이터를 돌려주지 않는다', Object.keys(JSON.parse(doGet().getContent())).sort().join(), 'ok,service,version');
 
+
+  group('새 표가 생겨도 기존 시트에서 자동으로 만들어진다 (Settings)');
+  ss.deleteSheet(ss.getSheetByName('Settings'));
+  check('(준비) Settings 시트를 지워 옛 버전 시트를 흉내 낸다', !ss.getSheetByName('Settings'));
+  eq('조회하면 시트를 만들고 기본(빈 값)을 돌려준다', post('site.get', {}).data.title_image, '');
+  check('Settings 시트가 열 제목과 함께 새로 생겼다', !!ss.getSheetByName('Settings') && ss.getSheetByName('Settings').rows[0][0] === 'setting_key');
+
   var bad = results.filter(function (r) { return !r.ok; });
   var sum = document.getElementById('sum');
   sum.textContent = (bad.length ? '✘ 실패 ' + bad.length + '건 / ' : '✔ 모두 통과 · ') + '검사 ' + results.length + '개';

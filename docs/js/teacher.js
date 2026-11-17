@@ -245,6 +245,14 @@
       <div class="card"><h3>백업 · 복원</h3><p class="small">우리 학급의 계정(비밀번호는 암호화된 상태)·학습 기록·문장·수정 이력·피드백을 하나의 파일로 저장해요.</p>
         <div class="row"><button class="btn primary" id="bk">백업 파일 만들기</button><label class="btn" style="cursor:pointer">백업 파일로 복원<input id="rs" type="file" accept=".json,application/json" class="sr-only"></label></div>
         <p class="small muted" style="margin-top:8px">복원은 «있으면 덮어쓰고, 없으면 되살리는» 방식이며 지우지는 않아요. 다른 선생님의 백업 파일은 복원되지 않아요. 구글 시트 전체 백업은 Apps Script 의 <code>installNightlyBackup</code> 으로 매일 밤 자동으로 걸 수 있어요.</p></div>
+      <div class="card"><h3>앱 타이틀 이미지</h3>
+        <p class="small muted">홈·로그인 화면 맨 위와 상단 헤더에 보이는 이미지예요. 이미지는 <b>비율만 맞춰 보여 주고 변형하지 않아요.</b> 교사(관리자)만 바꿀 수 있고, 바꾸면 모든 학생 화면에 반영돼요.</p>
+        <div class="grid g2"><div><b class="small">지금 쓰는 이미지</b><div id="ti-now" class="card flat" style="margin-top:6px;padding:8px">${UI.titleImg('')}</div></div>
+          <div><b class="small">새 이미지 미리보기</b><div id="ti-new" class="card flat" style="margin-top:6px;padding:8px;min-height:90px"><p class="small muted" style="margin:6px">아래 «이미지 고르기» 로 파일을 고르면 여기에 미리 보여요.</p></div></div></div>
+        <div id="ti-info" class="small" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:10px"><label class="btn" style="cursor:pointer">이미지 고르기<input id="ti-file" type="file" accept="image/png,image/webp,image/jpeg" class="sr-only"></label>
+          <button class="btn primary" id="ti-apply" disabled>이 이미지로 적용</button><button class="btn danger" id="ti-reset">기본 이미지로 되돌리기</button></div>
+        <p class="small muted" style="margin-top:8px">권장: 가로로 긴 이미지(약 3:1, 예: 2048×682), PNG·WEBP·JPG, 330KB 이하. 파일이 더 크면 자동으로 줄여 올려요(이때만 화질이 조금 줄 수 있어요).</p></div>
       <div class="card"><h3>개인정보 · 보관 · 삭제</h3><ul class="small">
         <li><b>받는 정보</b>: 이름(교사가 입력), 번호, 아이디, 암호화한 비밀번호, 학습 기록. 전화번호·개인 이메일·주민등록번호는 받지 않아요.</li>
         <li><b>접근 기록</b>: 로그인·계정 발급·학생 기록 열람·내보내기가 «현황 → 접근 기록» 에 남아요.</li>
@@ -264,5 +272,53 @@
         var r = await Api.save('backup.restore', { backup: b }); UI.toast(r.restored + '줄을 복원했어요.', 'ok'); }
       catch (e) { UI.toast(e instanceof SyntaxError ? '백업 파일이 아니에요.' : UI.errMsg(e), 'err'); }
       this.value = ''; };
+
+    /* ---- 타이틀 이미지 교체 ---- */
+    var pending = null; // { dataUrl, w, h, note }
+    var LIMIT = 450000;  // 서버가 받는 데이터 주소 글자 수 (≈ 파일 330KB)
+    function readFile(f) { return new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(r.result); }; r.onerror = function () { rej(new Error('파일을 읽지 못했어요.')); }; r.readAsDataURL(f); }); }
+    function loadImg(src) { return new Promise(function (res, rej) { var i = new Image(); i.onload = function () { res(i); }; i.onerror = function () { rej(new Error('이미지를 열 수 없는 파일이에요.')); }; i.src = src; }); }
+    async function shrink(img) { // 용량이 넘을 때만 가로를 줄여 WEBP 로 다시 만든다
+      var steps = [[1600, 0.92], [1400, 0.85], [1200, 0.8], [1000, 0.75]];
+      for (var i = 0; i < steps.length; i++) {
+        var w = Math.min(img.naturalWidth, steps[i][0]), h = Math.round(img.naturalHeight * w / img.naturalWidth);
+        var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        var d = cv.toDataURL('image/webp', steps[i][1]);
+        if (d.indexOf('data:image/webp') === 0 && d.length <= LIMIT) return d;
+      }
+      return null;
+    }
+    $('#ti-file', root).onchange = async function () {
+      var f = this.files[0]; if (!f) return;
+      var info = $('#ti-info', root), box = $('#ti-new', root), btn = $('#ti-apply', root);
+      pending = null; btn.disabled = true; info.textContent = '';
+      try {
+        if (!/^image\/(png|webp|jpeg)$/.test(f.type)) throw new Error('PNG·WEBP·JPG 이미지 파일만 쓸 수 있어요. (SVG 는 안 돼요)');
+        var d = await readFile(f), img = await loadImg(d), note = '';
+        if (d.length > LIMIT) {
+          var small = await shrink(img);
+          if (!small) throw new Error('이미지가 너무 커서 줄여도 올릴 수 없어요. 더 작은 파일을 골라 주세요.');
+          d = small; note = '원본이 커서 자동으로 줄였어요(WEBP, 화질이 조금 줄 수 있어요).';
+        }
+        var ratio = img.naturalWidth / img.naturalHeight;
+        pending = { dataUrl: d };
+        put(box, html`<img src="${d}" alt="새 타이틀 이미지 미리보기" style="display:block;width:100%;height:auto;object-fit:contain">`);
+        info.innerHTML = '';
+        put(info, html`${f.name} · ${img.naturalWidth}×${img.naturalHeight}px · 약 ${Math.round(d.length * 3 / 4 / 1024)}KB ${note ? html`<br><span class="chip warn">${note}</span>` : ''}${(ratio < 2.2 || ratio > 4) ? html`<br><span class="chip warn">가로형(약 3:1) 이미지가 아니에요. 홈 화면에서 작거나 크게 보일 수 있어요.</span>` : ''}`);
+        btn.disabled = false;
+      } catch (e) { put(box, html`<p class="small muted" style="margin:6px">미리 볼 수 없어요.</p>`); info.textContent = UI.errMsg(e); info.className = 'small'; UI.toast(UI.errMsg(e), 'err'); }
+    };
+    $('#ti-apply', root).onclick = async function () {
+      if (!pending) return;
+      if (!(await UI.confirm('이 이미지로 바꿀까요?', '모든 학생과 교사 화면의 타이틀 이미지가 바뀌어요. 언제든 기본 이미지로 되돌릴 수 있어요.', '적용'))) return;
+      try { var r = await Api.save('site.set_title', { data_url: pending.dataUrl }); try { localStorage.setItem('vp_title', r.title_image); } catch (e) {} UI.setTitle(r.title_image); UI.toast('타이틀 이미지를 바꿨어요.', 'ok'); pending = null; $('#ti-apply', root).disabled = true; }
+      catch (e) { UI.toast(UI.errMsg(e), 'err'); }
+    };
+    $('#ti-reset', root).onclick = async function () {
+      if (!(await UI.confirm('기본 이미지로 되돌릴까요?', '올려 둔 이미지는 지워지고 처음의 타이틀 이미지로 돌아가요.', '되돌리기'))) return;
+      try { await Api.save('site.reset_title', {}); try { localStorage.removeItem('vp_title'); } catch (e) {} UI.setTitle(''); UI.toast('기본 이미지로 되돌렸어요.', 'ok'); }
+      catch (e) { UI.toast(UI.errMsg(e), 'err'); }
+    };
   };
 })();

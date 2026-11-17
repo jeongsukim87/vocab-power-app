@@ -288,6 +288,26 @@ async function main() {
   check('고친 어휘는 학생의 동기화 변경분에 실린다', w.must(w.B, 'sync').delta.vocabulary.some(function (v) { return v.vocabulary_id === V && v.definition === '고친 뜻풀이'; }));
   eq('교사가 새 어휘를 추가', w.must(w.T, 'vocab.save', { headword: '새로운말', definition: '뜻', subject: '국어' }).origin, 'CUSTOM');
 
+
+  group('타이틀 이미지 설정 (교사만 바꿀 수 있음)');
+  w = world();
+  var PNG = 'data:image/png;base64,' + btoa('x'.repeat(30)).replace(/=+$/, '') + 'AAAA';
+  var BIG = 'data:image/png;base64,' + 'A'.repeat(130000); // 40,000자 칸 4개로 쪼개져야 하는 크기
+  eq('로그인 없이 조회하면 기본(빈 값)', w.must('', 'site.get').title_image, '');
+  eq('학생은 바꿀 수 없다', code(w.call(w.A, 'site.set_title', { data_url: PNG })), 'FORBIDDEN');
+  eq('로그인 없이 바꿀 수 없다', code(w.call('', 'site.set_title', { data_url: PNG })), 'UNAUTHENTICATED');
+  eq('학생은 되돌릴 수도 없다', code(w.call(w.A, 'site.reset_title')), 'FORBIDDEN');
+  eq('교사가 큰 이미지를 올린다', code(w.call(w.T, 'site.set_title', { data_url: BIG })), 'OK');
+  check('큰 이미지가 여러 칸으로 쪼개져 저장된다', w.store.all('Settings').filter(function (s) { return /^title_image:\d+$/.test(s.setting_key); }).length === 4 && w.store.all('Settings').every(function (s) { return s.value.length <= 40000; }));
+  eq('로그인 없이도 똑같은 이미지가 조립되어 나온다(학생 화면·로그인 화면용)', w.must('', 'site.get').title_image === BIG, true);
+  eq('더 작은 이미지로 바꾸면 남은 조각이 지워진다', (function () { w.must(w.T, 'site.set_title', { data_url: PNG }); return w.store.all('Settings').length + ':' + (w.must('', 'site.get').title_image === PNG); })(), '2:true');
+  eq('SVG 는 거절(스크립트 심기 방지)', code(w.call(w.T, 'site.set_title', { data_url: 'data:image/svg+xml;base64,PHN2Zz4=' })), 'BAD_REQUEST');
+  eq('이미지가 아닌 글자는 거절', code(w.call(w.T, 'site.set_title', { data_url: 'javascript:alert(1)' })), 'BAD_REQUEST');
+  eq('글자 수 한도(330KB)를 넘으면 거절', code(w.call(w.T, 'site.set_title', { data_url: 'data:image/png;base64,' + 'A'.repeat(460000) })), 'TOO_LARGE');
+  eq('거절된 뒤에도 이전 이미지가 그대로 남는다', w.must('', 'site.get').title_image === PNG, true);
+  eq('교사가 기본으로 되돌린다', (function () { w.must(w.T, 'site.reset_title'); return w.must('', 'site.get').title_image + '|' + w.store.all('Settings').length; })(), '|0');
+  check('변경·되돌리기가 접근 기록에 남는다', w.must(w.T, 'audit.list').some(function (l) { return l.action === 'title_set'; }) && w.must(w.T, 'audit.list').some(function (l) { return l.action === 'title_reset'; }));
+
   /* ===== 결과 ===== */
   var bad = results.filter(function (r) { return !r.ok; });
   var sum = document.getElementById('sum');

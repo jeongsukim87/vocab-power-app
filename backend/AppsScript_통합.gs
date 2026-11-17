@@ -108,7 +108,9 @@ var VocabCore = (function () {
     TEXT_MAX: 2000,
     SHORT_MAX: 200,
     REQLOG_MINUTES: 30,
-    MIN_PW: { student: 6, teacher: 10 }
+    MIN_PW: { student: 6, teacher: 10 },
+    TITLE_MAX_CHARS: 450000, // 타이틀 이미지(데이터 주소) 최대 글자 수 = 파일 약 330KB
+    CELL_CHUNK: 40000        // 시트 한 칸은 5만 글자까지라 이 크기로 쪼개 저장
   };
 
   /* ------------------------------------------------------------------ 표(시트) 정의
@@ -145,7 +147,8 @@ var VocabCore = (function () {
     TeacherFeedback: ['feedback_id', 'target_id', 'target_type', 'student_id', 'teacher_id', 'comment', 'rubric:j',
       'created_at', 'updated_at', 'read_at'],
     AuditLogs: ['log_id', 'actor_id', 'action', 'target_id', 'detail', 'created_at'],
-    ReqLog: ['req_id', 'user_id', 'response', 'created_at']
+    ReqLog: ['req_id', 'user_id', 'response', 'created_at'],
+    Settings: ['setting_key', 'value', 'updated_at', 'updated_by']
   };
 
   var RUBRIC = ['accuracy', 'context', 'clarity', 'own_thought', 'transfer'];
@@ -419,6 +422,49 @@ var VocabCore = (function () {
         .forEach(function (s) { store.remove('Sessions', s.token_hash); });
       audit(u.user_id, 'change_password', u.user_id, '');
       return { changed: true };
+    });
+
+    /* ================================================================= 사이트 설정: 타이틀 이미지 */
+    // 로그인 화면에서도 보여야 하므로 «조회» 는 로그인 없이 열려 있다 (이미지 하나만 돌려준다).
+    // 교체·되돌리기는 교사만 한다. 교사 계정은 서버 관리자만 만들 수 있으므로 «교사 = 관리자» 이다.
+    function readTitle() {
+      var meta = get('Settings', 'title_image:meta');
+      if (!meta) return '';
+      var m; try { m = JSON.parse(meta.value); } catch (e) { return ''; }
+      var out = '';
+      for (var i = 0; i < m.n; i++) { var c = get('Settings', 'title_image:' + i); if (!c) return ''; out += c.value; }
+      return out;
+    }
+    function putSetting(key, value, by) {
+      var cur = get('Settings', key), now = nowIso();
+      if (cur) store.update('Settings', key, { value: value, updated_at: now, updated_by: by });
+      else store.insert('Settings', { setting_key: key, value: value, updated_at: now, updated_by: by });
+    }
+    function clearTitle() {
+      where('Settings', function (s) { return s.setting_key.indexOf('title_image:') === 0; }).forEach(function (s) { store.remove('Settings', s.setting_key); });
+    }
+
+    def('site.get', { auth: 'none' }, function () {
+      var meta = get('Settings', 'title_image:meta');
+      return { title_image: readTitle(), updated_at: meta ? meta.updated_at : '' };
+    });
+
+    def('site.set_title', { auth: 'teacher', write: true }, function (ctx, p) {
+      var d = p.data_url;
+      if (!isStr(d) || !/^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+\/]+={0,2}$/.test(d)) fail('BAD_REQUEST', 'PNG·WEBP·JPG 이미지 파일만 쓸 수 있습니다. (SVG 는 안 됩니다)');
+      if (d.length > C.TITLE_MAX_CHARS) fail('TOO_LARGE', '이미지가 너무 큽니다. 330KB 이하로 줄여 주세요.');
+      clearTitle();
+      var n = Math.ceil(d.length / C.CELL_CHUNK);
+      for (var i = 0; i < n; i++) putSetting('title_image:' + i, d.substr(i * C.CELL_CHUNK, C.CELL_CHUNK), ctx.user.user_id);
+      putSetting('title_image:meta', JSON.stringify({ n: n, bytes: Math.floor(d.length * 3 / 4) }), ctx.user.user_id); // 조각을 모두 쓴 뒤 마지막에 표시
+      audit(ctx.user.user_id, 'title_set', '', 'chars=' + d.length);
+      return { title_image: d, updated_at: nowIso() };
+    });
+
+    def('site.reset_title', { auth: 'teacher', write: true }, function (ctx) {
+      clearTitle();
+      audit(ctx.user.user_id, 'title_reset', '', '');
+      return { title_image: '' };
     });
 
     def('auth.me', { auth: 'any' }, function (ctx) { return { user: publicUser(ctx.user), expires_at: ctx.session.expires_at }; });
@@ -1203,10 +1249,21 @@ function SheetsStore_(ss) {
   var T = VocabCore.TABLES;
   var cache = {};
 
-  function sheetOf(t) {
-    var sh = ss.getSheetByName(t);
-    if (!sh) throw new Error('시트가 없습니다: ' + t + ' (setup() 을 먼저 실행하세요)');
+  function makeSheet(t) { // 시트 한 장을 만들고 열 제목·서식을 넣는다
+    var sh = ss.getSheetByName(t) || ss.insertSheet(t);
+    var heads = T[t].map(VocabCore.colName);
+    sh.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight('bold').setBackground('#eef2ff');
+    sh.setFrozenRows(1);
+    T[t].forEach(function (c, i) {
+      var isNum = c.indexOf(':n') > 0;
+      sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat(isNum ? '0' : '@');
+    });
     return sh;
+  }
+
+  function sheetOf(t) {
+    // 새 버전에서 표가 늘어나도(예: Settings) 기존 시트를 건드리지 않고 없는 표만 만든다
+    return ss.getSheetByName(t) || makeSheet(t);
   }
 
   function load(t) {
@@ -1224,17 +1281,7 @@ function SheetsStore_(ss) {
     invalidate: function () { cache = {}; },
 
     ensure: function () {
-      Object.keys(T).forEach(function (t) {
-        var sh = ss.getSheetByName(t);
-        var heads = T[t].map(VocabCore.colName);
-        if (!sh) sh = ss.insertSheet(t);
-        sh.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight('bold').setBackground('#eef2ff');
-        sh.setFrozenRows(1);
-        T[t].forEach(function (c, i) {
-          var isNum = c.indexOf(':n') > 0;
-          sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat(isNum ? '0' : '@');
-        });
-      });
+      Object.keys(T).forEach(function (t) { makeSheet(t); });
       var first = ss.getSheetByName('Sheet1') || ss.getSheetByName('시트1');
       if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
     },

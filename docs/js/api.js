@@ -2,7 +2,8 @@
 var Api = (function () {
   'use strict';
   var cfg = window.APP_CONFIG || {};
-  var mode = cfg.SERVER_URL ? 'server' : 'demo';
+  // 주소 뒤에 ?demo=1 을 붙이면 서버 주소가 있어도 체험 모드로 열린다 (실제 학생 기록을 건드리지 않고 화면을 볼 때)
+  var mode = (cfg.SERVER_URL && !/[?&]demo=1(&|$)/.test(location.search)) ? 'server' : 'demo';
   var token = null;
   var AUTH_LOST = { UNAUTHENTICATED: 1, SESSION_EXPIRED: 1 };
   var api = { mode: mode, onAuthLost: null, onBusy: null };

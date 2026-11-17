@@ -44,6 +44,9 @@
 | `auth.activate` | 로그인 전 | 쓰기 | 초대 코드로 처음 비밀번호 만들기(1회용) | login_id, invite_code, new_password | token, user |
 | `auth.logout` | 로그인한 모두 | 쓰기 | 로그아웃(서버의 세션도 지움) | - | bye |
 | `auth.change_password` | 로그인한 모두 | 쓰기 | 비밀번호 변경(다른 기기 로그아웃) | old_password, new_password | changed |
+| `site.get` | 로그인 전 | 읽기 | 타이틀 이미지 조회(로그인 전에도 열려 있음) | - | title_image(비어 있으면 기본 이미지) |
+| `site.set_title` | 교사 | 쓰기 | 타이틀 이미지 교체(교사=관리자 전용, PNG·WEBP·JPG, 330KB 이하) | data_url | title_image |
+| `site.reset_title` | 교사 | 쓰기 | 타이틀 이미지를 기본으로 되돌리기 | - | title_image |
 | `auth.me` | 로그인한 모두 | 읽기 | 지금 로그인한 사용자 | - | user, expires_at |
 | `sync` | 학생 | 읽기 | 학생 본인의 기록 전부 + 공개된 차시 + 교사 수정분 | - | user, class, lessons, sv, collections, writings, daily, reviews, feedback, shared, delta |
 | `sv.save` | 학생 | 쓰기 | 어휘 학습 기록(교과서 문장·짐작·설명, 단계 표시) | vocabulary_id, textbook_sentence?, guessed_meaning?, self_explanation?, mark?[], base_rev? | 저장된 행 |

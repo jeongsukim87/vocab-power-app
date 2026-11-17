@@ -34,6 +34,7 @@ TABLE_NOTE = {
     "ReviewRecords": "복습 결과.",
     "TeacherFeedback": "서술형 피드백과 5개 준거 점수.",
     "AuditLogs": "접근 기록(로그인, 학생 기록 열람, 내보내기, 백업 …).",
+    "Settings": "사이트 설정. 지금은 타이틀 이미지(큰 글자는 40,000자씩 쪼개 여러 줄에 저장).",
     "ReqLog": "같은 저장 요청이 두 번 와도 한 번만 처리하기 위한 짧은 기록(30분 뒤 정리).",
 }
 
@@ -94,6 +95,9 @@ DESC = {
     "export.class": ("내보내기용 표(CSV/XLSX 는 화면에서 만듦)", "class_id, kind", "filename, rows"),
     "backup.export": ("내 학급 백업(JSON)", "-", "backup"),
     "backup.restore": ("백업으로 복원(덮어쓰기·되살리기, 삭제 없음)", "backup", "restored"),
+    "site.get": ("타이틀 이미지 조회(로그인 전에도 열려 있음)", "-", "title_image(비어 있으면 기본 이미지)"),
+    "site.set_title": ("타이틀 이미지 교체(교사=관리자 전용, PNG·WEBP·JPG, 330KB 이하)", "data_url", "title_image"),
+    "site.reset_title": ("타이틀 이미지를 기본으로 되돌리기", "-", "title_image"),
     "audit.list": ("접근 기록 최근 200건", "-", "[log]"),
 }
 who = {"none": "로그인 전", "any": "로그인한 모두", "student": "학생", "teacher": "교사"}

@@ -119,8 +119,9 @@ var SV = (function () { // 서버에 받은 행을 내 기록 목록에 끼워 �
     function link(vid) { var v = Calc.info(vid); return v.origin === 'SCHOOL' ? '#/school/' + vid : v.origin === 'PERSONAL' ? '#/collect/' + vid : '#/national/' + vid; }
 
     put(root, html`<div class="stack">
-      <div class="hero"><div class="slogan">아는 어휘에서 쓰는 어휘로!</div><h1>${S.user.display_name}님, 안녕하세요</h1><p>어휘를 이해하고, 생각을 확장하고, 나의 언어로 표현하다.</p>
-        ${cont ? html`<p style="margin-top:12px"><a class="btn green" href="${link(cont.vocabulary_id)}">이어서 학습하기 · ${cont.headword}</a></p>` : html`<p style="margin-top:12px"><a class="btn green" href="#/vocab">어휘 학습 시작하기</a></p>`}</div>
+      <section class="title-hero" aria-label="힘이 되는 학습도구어">${UI.titleImg('')}<p class="slogan-small">아는 어휘에서 쓰는 어휘로!</p></section>
+      <div class="card greet"><div class="row between"><div><b style="font-size:1.1rem">${S.user.display_name}님, 안녕하세요</b><div class="small muted">어휘를 이해하고, 생각을 확장하고, 나의 언어로 표현하다.</div></div>
+        ${cont ? html`<a class="btn primary" href="${link(cont.vocabulary_id)}">이어서 학습하기 · ${cont.headword}</a>` : html`<a class="btn primary" href="#/vocab">어휘 학습 시작하기</a>`}</div></div>
 
       <div class="grid g4">
         <div class="card stat"><div class="l">34차시 진도</div><div class="n">${lessonsDone}<small> / 34</small></div>${UI.bar(UI.pct(lessonsDone, 34))}<div class="small muted" style="margin-top:6px">공개된 차시 ${sn.lessons.length}개</div></div>

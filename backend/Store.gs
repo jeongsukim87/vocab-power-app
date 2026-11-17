@@ -8,10 +8,21 @@ function SheetsStore_(ss) {
   var T = VocabCore.TABLES;
   var cache = {};
 
-  function sheetOf(t) {
-    var sh = ss.getSheetByName(t);
-    if (!sh) throw new Error('시트가 없습니다: ' + t + ' (setup() 을 먼저 실행하세요)');
+  function makeSheet(t) { // 시트 한 장을 만들고 열 제목·서식을 넣는다
+    var sh = ss.getSheetByName(t) || ss.insertSheet(t);
+    var heads = T[t].map(VocabCore.colName);
+    sh.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight('bold').setBackground('#eef2ff');
+    sh.setFrozenRows(1);
+    T[t].forEach(function (c, i) {
+      var isNum = c.indexOf(':n') > 0;
+      sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat(isNum ? '0' : '@');
+    });
     return sh;
+  }
+
+  function sheetOf(t) {
+    // 새 버전에서 표가 늘어나도(예: Settings) 기존 시트를 건드리지 않고 없는 표만 만든다
+    return ss.getSheetByName(t) || makeSheet(t);
   }
 
   function load(t) {
@@ -29,17 +40,7 @@ function SheetsStore_(ss) {
     invalidate: function () { cache = {}; },
 
     ensure: function () {
-      Object.keys(T).forEach(function (t) {
-        var sh = ss.getSheetByName(t);
-        var heads = T[t].map(VocabCore.colName);
-        if (!sh) sh = ss.insertSheet(t);
-        sh.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight('bold').setBackground('#eef2ff');
-        sh.setFrozenRows(1);
-        T[t].forEach(function (c, i) {
-          var isNum = c.indexOf(':n') > 0;
-          sh.getRange(2, i + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat(isNum ? '0' : '@');
-        });
-      });
+      Object.keys(T).forEach(function (t) { makeSheet(t); });
       var first = ss.getSheetByName('Sheet1') || ss.getSheetByName('시트1');
       if (first && ss.getSheets().length > 1 && first.getLastRow() === 0) ss.deleteSheet(first);
     },

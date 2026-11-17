@@ -24,6 +24,7 @@ var App = (function () {
   };
 
   function renderChrome() {
+    UI.setTitle(UI.title.custom);
     var nav = S.user ? (S.user.role === 'teacher' ? TEACHER_NAV : STUDENT_NAV) : [];
     var cur = location.hash;
     var on = function (h) { return cur === h || cur.indexOf(h + '/') === 0 || cur.indexOf(h + '?') === 0 ? 'on' : ''; };
@@ -62,7 +63,7 @@ var App = (function () {
     var v = view(), last = ''; try { last = localStorage.getItem('vp_last_login') || ''; } catch (e) {}
     var demo = Api.mode === 'demo';
     v.innerHTML = html`<div class="login-wrap stack">
-      <div class="hero"><div class="slogan">아는 어휘에서 쓰는 어휘로!</div><h1>힘이 되는 학습도구어</h1><p>어휘를 이해하고, 생각을 확장하고, 나의 언어로 표현하다.</p></div>
+      <div class="title-hero">${UI.titleImg('')}<p class="slogan-small">아는 어휘에서 쓰는 어휘로!</p><p class="small muted center" style="margin:2px 0 0">어휘를 이해하고, 생각을 확장하고, 나의 언어로 표현하다.</p></div>
       ${msg ? html`<div class="notice err" role="alert">${msg}</div>` : ''}
       <div class="card">
         <div class="pill-tabs" role="tablist"><button class="on" data-tab="in" role="tab">로그인</button><button data-tab="first" role="tab">처음 오셨나요?</button></div>
@@ -159,8 +160,24 @@ var App = (function () {
   /* ---------------- 시작 ---------------- */
   function loadScript(src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = function () { rej(new Error(src + ' 를 불러오지 못했습니다.')); }; document.head.appendChild(s); }); }
 
+  /* ---- 타이틀 이미지: 마지막으로 받은 것을 기기에 저장해 두었다가 먼저 보여 주고, 서버의 최신 값으로 바로잡는다 ---- */
+  function U_cache() {
+    var c = ''; try { c = localStorage.getItem('vp_title') || ''; } catch (e) {}
+    if (c) UI.title.custom = c;
+    UI.setTitle(UI.title.custom);
+  }
+  A.loadTitle = async function () {
+    try {
+      var r = await Api.call('site.get');
+      var d = r.title_image || '';
+      try { if (d) localStorage.setItem('vp_title', d); else localStorage.removeItem('vp_title'); } catch (e) {}
+      if (d !== UI.title.custom) UI.setTitle(d);
+    } catch (e) { /* 서버가 없거나 느리면 기본 이미지로 계속 */ }
+  };
+
   A.boot = async function () {
     var v = view();
+    try { U_cache(); } catch (e) { /* 저장소를 못 쓰는 환경 */ }
     try {
       if (Api.mode === 'demo') { await loadScript('js/memory_store.js'); await loadScript('js/demo_env.js'); await loadScript('js/seed_examples.js'); }
       await Data.load();
@@ -176,6 +193,7 @@ var App = (function () {
       location.hash = '#/login'; A.route();
     };
     window.addEventListener('hashchange', A.route);
+    A.loadTitle();
     if (Api.restoreToken()) {
       try {
         var me = await Api.call('auth.me'); S.user = me.user;
