@@ -6,6 +6,6 @@
  *   예)  SERVER_URL: "https://script.google.com/macros/s/AKfycb.../exec"
  */
 window.APP_CONFIG = {
-  SERVER_URL: "",
+  SERVER_URL: "https://script.google.com/macros/s/AKfycbw1rWlrnZjoDdbCdqML4iADczHWO7n1edsL5Q1tXYSEY267R-ZjakO9wOkwYaSzpQog/exec",
   SCHOOL_LABEL: "2학년 학교자율시간"
 };
